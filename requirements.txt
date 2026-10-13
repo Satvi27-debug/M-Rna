@@ -1,0 +1,50 @@
+# mRNA Vaccine Intelligence & Protection (VIP)
+# Dependency set as specified in the PRD, Section 11.1.
+#
+# Every entry below maps to code that this project actually runs:
+#   pandas, numpy, scikit-learn  -> src/data, src/ml
+#   torch                        -> PyTorch parity check for src/attention
+#   matplotlib, seaborn          -> src/attention, src/ml, dashboard
+#   langchain, langchain-community, langchain-openai -> src/rag, src/llm
+#   chromadb, sentence-transformers                   -> src/rag
+#   pydantic                                        -> src/llm/schemas.py
+#   joblib                                         -> src/ml model artifacts
+#   python-dotenv                                  -> secret loading in src/llm
+#
+# No package has been added for popularity's sake. The single addition to the
+# PRD list is pytest, which is required to run the test suite under tests/.
+
+# --- Data handling -------------------------------------------------------
+pandas>=2.0
+numpy>=1.24
+
+# --- Module 1: classical ML ---------------------------------------------
+scikit-learn>=1.3
+joblib>=1.3
+
+# --- Module 2: deep learning mathematics --------------------------------
+torch>=2.1
+
+# --- Modules 2 and 5: figures -------------------------------------------
+matplotlib>=3.7
+seaborn>=0.12
+
+# --- Module 3: retrieval index ------------------------------------------
+langchain>=0.1
+langchain-community>=0.0.20
+chromadb>=0.4
+sentence-transformers>=2.2
+
+# --- Guideline source ingestion (Module 3) ------------------------------
+# The supplied regulatory source is a .docx; python-docx extracts its text.
+python-docx>=1.1
+
+# --- Module 4: structured LLM output ------------------------------------
+langchain-openai>=0.0.5
+pydantic>=2.5
+
+# --- Configuration and secrets ------------------------------------------
+python-dotenv>=1.0
+
+# --- Test suite (tests/) -------------------------------------------------
+pytest>=7.4

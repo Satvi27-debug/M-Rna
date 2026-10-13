@@ -1,0 +1,72 @@
+# ---------------------------------------------------------------------------
+# Secrets - must never be committed (PRD checklist, Section 10.1)
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+
+# ---------------------------------------------------------------------------
+# Python environment
+# ---------------------------------------------------------------------------
+venv/
+.venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ---------------------------------------------------------------------------
+# Test and tooling caches
+# ---------------------------------------------------------------------------
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# ---------------------------------------------------------------------------
+# Generated artifacts that are reproducible from the committed source
+# Regenerate with:  python -m src.pipeline.pipeline --all
+# The figures and the sample report under outputs/ are kept, because the PRD
+# submission checklist requires the final figures to be committed.
+# ---------------------------------------------------------------------------
+
+# Trained model artifacts - reproduce with Module 1.
+models/*
+!models/.gitkeep
+
+# Local ChromaDB index - binary, regenerable, and large.
+# Rebuild with:  python -m src.rag.ingest
+vectorstore/*
+!vectorstore/.gitkeep
+
+# Cleaned dataset - reproduce with src/data/preprocessing.py
+data/processed/*.csv
+
+# PRD-named compatibility copies of the model artifact and the vector index.
+outputs/risk_model.joblib
+outputs/chroma_store/
+
+# Pipeline logs and latency records - machine output, not a deliverable.
+outputs/logs/*.json
+outputs/logs/*.npy
+outputs/logs/*.txt
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<meta name="description" content="mRNA Vaccine Intelligence and Protection - student engineering project interface.">
+<title>mRNA VIP &middot; Vaccine Intelligence &amp; Protection</title>
+<link rel="stylesheet" href="/static/app.css">
+<style id="vip-theme">
+/*__VIP_THEME__*/
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+
+<!-- ============================= HEADER ============================= -->
+<header class="app-header">
+  <button class="icon-button nav-toggle" id="nav-toggle"
+          aria-label="Open navigation menu" aria-expanded="false"
+          aria-controls="sidebar">
+    <span class="hamburger" aria-hidden="true"><i></i><i></i><i></i></span>
+  </button>
+
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">m</span>
+    <span class="brand-text">
+      <strong class="brand-name">mRNA VIP</strong>
+      <span class="brand-sub">Vaccine Intelligence &amp; Protection</span>
+    </span>
+  </div>
+
+  <div class="header-actions">
+    <span class="status-pill" id="system-status" role="status" aria-live="polite">
+      <span class="dot" aria-hidden="true"></span>
+      <span class="status-text">System Status</span>
+    </span>
+    <span class="chip" id="environment-chip" title="Runtime environment">Environment</span>
+    <button class="icon-button" id="settings-button"
+            aria-label="About this project" aria-haspopup="dialog">
+      <span aria-hidden="true">&#9881;</span>
+    </button>
+  </div>
+</header>
+
+<div class="nav-scrim" id="nav-scrim" hidden></div>
+
+<!-- ============================= SIDEBAR ============================= -->
+<nav class="sidebar" id="sidebar" aria-label="Primary">
+  <ul class="nav-list">
+    <li><a class="nav-link is-active" href="#/overview" data-route="overview" aria-current="page">
+      <span class="nav-icon" aria-hidden="true">&#9632;</span><span>Overview</span></a></li>
+    <li><a class="nav-link" href="#/patient" data-route="patient">
+      <span class="nav-icon" aria-hidden="true">&#9679;</span><span>Patient Analysis</span></a></li>
+    <li><a class="nav-link" href="#/risk" data-route="risk">
+      <span class="nav-icon" aria-hidden="true">&#9650;</span><span>Risk Prediction</span></a></li>
+    <li><a class="nav-link" href="#/attention" data-route="attention">
+      <span class="nav-icon" aria-hidden="true">&#9635;</span><span>mRNA Attention</span></a></li>
+    <li><a class="nav-link" href="#/regulatory" data-route="regulatory">
+      <span class="nav-icon" aria-hidden="true">&#9776;</span><span>Regulatory Intelligence</span></a></li>
+    <li><a class="nav-link" href="#/report" data-route="report">
+      <span class="nav-icon" aria-hidden="true">&#9636;</span><span>Safety Report</span></a></li>
+  </ul>
+
+  <div class="nav-footer">
+    <p class="nav-footer-label">Student Engineering Project</p>
+    <p class="nav-footer-note" id="nav-version">v0.1.0</p>
+  </div>
+</nav>
+
+<!-- ============================= MAIN ============================= -->
+<main class="app-main" id="main" tabindex="-1">
+
+<!-- ---------- OVERVIEW ---------- -->
+<section class="page is-active" id="page-overview" aria-labelledby="h-overview">
+  <div class="page-head">
+    <h1 id="h-overview">mRNA Vaccine Intelligence &amp; Protection</h1>
+    <p class="page-sub">An engineering pipeline combining patient-risk modeling, mRNA
+      self-attention, regulatory retrieval, and structured safety reporting.</p>
+  </div>
+
+  <section class="card" aria-labelledby="h-pipeline">
+    <div class="card-head">
+      <h2 id="h-pipeline">Pipeline</h2>
+      <p class="card-sub">Stage readiness reflects the artifacts present on disk.</p>
+    </div>
+    <ol class="pipeline" id="pipeline" aria-label="Pipeline stages"></ol>
+  </section>
+
+  <section class="card" aria-labelledby="h-metrics">
+    <div class="card-head">
+      <h2 id="h-metrics">Project Metrics</h2>
+      <p class="card-sub">Specification-derived values only. Model outputs appear after
+        the pipeline runs.</p>
+    </div>
+    <!-- Each .metric is a <div> wrapping one <dt> with its <dd> values, which is
+         the only child pattern <dl> permits. -->
+    <dl class="metric-grid" id="metric-grid"></dl>
+  </section>
+
+  <section aria-labelledby="h-visuals">
+    <h2 id="h-visuals" class="section-title">Results Visualisation</h2>
+    <div class="panel-grid">
+
+      <article class="panel" aria-labelledby="h-panel-roc">
+        <header class="panel-head">
+          <h3 id="h-panel-roc">ML Risk Classification</h3>
+          <p class="panel-sub">ROC performance comparison</p>
+        </header>
+        <div class="panel-body">
+          <div class="state" data-panel="roc" data-empty="Evaluation results will appear after model training.">
+            <div class="state-inner">
+              <span class="state-icon" aria-hidden="true">&#9635;</span>
+              <p class="state-text">Evaluation results will appear after model training.</p>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel" aria-labelledby="h-panel-attn">
+        <header class="panel-head">
+          <h3 id="h-panel-attn">mRNA Self-Attention</h3>
+          <p class="panel-sub">Feature interaction visualization</p>
+        </header>
+        <div class="panel-body">
+          <div class="state" data-panel="attention" data-empty="Attention map will appear after inference.">
+            <div class="state-inner">
+              <span class="state-icon" aria-hidden="true">&#9633;</span>
+              <p class="state-text">Attention map will appear after inference.</p>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel" aria-labelledby="h-panel-latency">
+        <header class="panel-head">
+          <h3 id="h-panel-latency">Pipeline Latency</h3>
+          <p class="panel-sub">Execution-time comparison by stage</p>
+        </header>
+        <div class="panel-body">
+          <div class="state" data-panel="latency" data-empty="Latency measurements will appear after pipeline execution.">
+            <div class="state-inner">
+              <span class="state-icon" aria-hidden="true">&#8981;</span>
+              <p class="state-text">Latency measurements will appear after pipeline execution.</p>
+            </div>
+          </div>
+        </div>
+      </article>
+
+    </div>
+  </section>
+</section>
+
+<!-- ---------- PATIENT ANALYSIS ---------- -->
+<section class="page" id="page-patient" aria-labelledby="h-patient" hidden>
+  <div class="page-head">
+    <h1 id="h-patient">Patient Analysis</h1>
+    <p class="page-sub">Prepare patient information for risk assessment.</p>
+  </div>
+
+  <div class="split">
+    <section class="card" aria-labelledby="h-form">
+      <div class="card-head">
+        <h2 id="h-form">Patient Record</h2>
+        <p class="card-sub">Fields match the supplied patient dataset exactly. No
+          additional clinical inputs are collected.</p>
+      </div>
+
+      <form class="form" id="patient-form" novalidate>
+        <div class="field">
+          <label for="f-patient-id">Patient ID</label>
+          <input type="text" id="f-patient-id" name="Patient_ID" placeholder="P0001"
+                 autocomplete="off" spellcheck="false" aria-describedby="h-patient-id">
+          <p class="hint" id="h-patient-id">Unique record identifier, e.g. P0001.</p>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="f-age">Age</label>
+            <input type="number" id="f-age" name="Age" min="18" max="85" step="1"
+                   inputmode="numeric" aria-describedby="h-age">
+            <p class="hint" id="h-age">Dataset range 18&ndash;85 years.</p>
+          </div>
+          <div class="field">
+            <label for="f-biomarker">Biomarker Level</label>
+            <input type="number" id="f-biomarker" name="Biomarker_Level" min="0"
+                   step="0.01" inputmode="decimal" aria-describedby="h-biomarker">
+            <p class="hint" id="h-biomarker">Inflammatory biomarker concentration (mg/L).</p>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="f-conditions">Pre-Existing Conditions</label>
+            <input type="number" id="f-conditions" name="Pre_Existing_Conditions"
+                   min="0" max="4" step="1" inputmode="numeric"
+                   aria-describedby="h-conditions">
+            <p class="hint" id="h-conditions">Count of relevant conditions, 0&ndash;4.</p>
+          </div>
+          <div class="field">
+            <label for="f-dose">Vaccine Dose (mcg)</label>
+            <input type="number" id="f-dose" name="Vaccine_Dose_mcg" min="25" max="150"
+                   step="0.1" inputmode="decimal" aria-describedby="h-dose">
+            <p class="hint" id="h-dose">Administered or candidate dose, 25&ndash;150 mcg.</p>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="f-history">Prior Reaction History</label>
+          <select id="f-history" name="Prior_Reaction_History" aria-describedby="h-history">
+            <option value="" selected>Not recorded</option>
+            <option value="None">None</option>
+            <option value="Mild">Mild</option>
+            <option value="Moderate">Moderate</option>
+          </select>
+          <p class="hint" id="h-history">None / Mild / Moderate. Left blank, the cleaning
+            stage imputes the column mode.</p>
+        </div>
+
+        <div class="form-error" id="form-error" role="alert" hidden></div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary" id="btn-run-analysis">
+            <span class="btn-label">Run Analysis</span>
+            <span class="spinner" aria-hidden="true"></span>
+          </button>
+          <button type="reset" class="btn btn-secondary">Reset</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card" aria-labelledby="h-results">
+      <div class="card-head">
+        <h2 id="h-results">Analysis Result</h2>
+        <p class="card-sub">Model prediction output.</p>
+      </div>
+
+      <div class="result-rows">
+        <div class="result-row">
+          <span class="result-label">Risk Classification</span>
+          <span class="result-value is-pending" id="risk-classification">Awaiting analysis</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label">Risk Probability</span>
+          <span class="result-value is-empty" id="risk-probability">&mdash;</span>
+        </div>
+        <div class="result-row is-block">
+          <span class="result-label">Model Explanation</span>
+          <p class="result-text" id="risk-explanation">Results will appear after model execution.</p>
+        </div>
+      </div>
+
+      <div class="dose-check" id="dose-check" data-state="not-initialized">
+        <div class="dose-head">
+          <span class="badge badge-neutral" id="dose-badge">
+            <span class="badge-icon" aria-hidden="true">&#9675;</span>
+            <span id="dose-badge-text">Dose Validation</span>
+          </span>
+        </div>
+        <p class="dose-text" id="dose-text">Maximum permitted dose will be evaluated by the validation pipeline.</p>
+        <ul class="dose-legend" aria-label="Dose validation states">
+          <li><span class="badge badge-success"><span class="badge-icon" aria-hidden="true">&#10003;</span>Valid Dose</span></li>
+          <li><span class="badge badge-warning"><span class="badge-icon" aria-hidden="true">&#9888;</span>Warning</span></li>
+          <li><span class="badge badge-danger"><span class="badge-icon" aria-hidden="true">&#10007;</span>Dose Limit Exceeded</span></li>
+        </ul>
+      </div>
+    </section>
+  </div>
+</section>
+
+<!-- ---------- RISK PREDICTION ---------- -->
+<section class="page" id="page-risk" aria-labelledby="h-risk" hidden>
+  <div class="page-head">
+    <h1 id="h-risk">Risk Prediction</h1>
+    <p class="page-sub">Compare the required machine-learning risk classifiers.</p>
+  </div>
+
+  <div class="model-grid" id="model-grid"></div>
+
+  <section class="card" aria-labelledby="h-compare">
+    <div class="card-head">
+      <h2 id="h-compare">Model Comparison</h2>
+      <p class="card-sub">Selection is made on held-out test-set F1 score.</p>
+    </div>
+    <div class="state" id="model-comparison">
+      <div class="state-inner">
+        <span class="state-icon" aria-hidden="true">&#9635;</span>
+        <p class="state-text">Model results will appear after training.</p>
+      </div>
+    </div>
+  </section>
+</section>
+
+<!-- ---------- mRNA ATTENTION ---------- -->
+<section class="page" id="page-attention" aria-labelledby="h-attention" hidden>
+  <div class="page-head">
+    <h1 id="h-attention">mRNA Self-Attention</h1>
+    <p class="page-sub">Inspect feature relationships produced by the attention mechanism.</p>
+  </div>
+
+  <section class="card" aria-labelledby="h-input-rep">
+    <div class="card-head">
+      <h2 id="h-input-rep">A. Input Representation</h2>
+      <p class="card-sub">Nucleotide sequence encoded into an embedding matrix.</p>
+    </div>
+    <div class="field">
+      <label for="f-sequence">Nucleotide Sequence</label>
+      <input type="text" id="f-sequence" class="mono-input" spellcheck="false"
+             autocomplete="off" aria-describedby="h-sequence"
+             placeholder="ACGUACGUACGGCUA">
+      <p class="hint" id="h-sequence">Bases A, C, G and U only. Length 5&ndash;50.</p>
+    </div>
+    <div class="field">
+      <label for="f-embed-dim">Embedding Dimension</label>
+      <input type="number" id="f-embed-dim" class="mono-input" step="1" readonly>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="h-matrix">
+    <div class="card-head">
+      <h2 id="h-matrix">B. Attention Matrix</h2>
+      <p class="card-sub">Each row is the distribution of attention across positions.</p>
+    </div>
+    <div class="state" id="attention-heatmap">
+      <div class="state-inner">
+        <span class="state-icon" aria-hidden="true">&#9633;</span>
+        <p class="state-text">Attention map will appear after inference.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="h-interpretation">
+    <div class="card-head">
+      <h2 id="h-interpretation">C. Interpretation</h2>
+      <p class="card-sub">Plain-language reading of the strongest attention pairs.</p>
+    </div>
+    <div class="state" id="attention-interpretation">
+      <div class="state-inner">
+        <span class="state-icon" aria-hidden="true">&#8801;</span>
+        <p class="state-text">Attention interpretation will appear after inference.</p>
+      </div>
+    </div>
+  </section>
+</section>
+
+<!-- ---------- REGULATORY INTELLIGENCE ---------- -->
+<section class="page" id="page-regulatory" aria-labelledby="h-regulatory" hidden>
+  <div class="page-head">
+    <h1 id="h-regulatory">Regulatory Intelligence</h1>
+    <p class="page-sub">Retrieve relevant evidence from the supplied mRNA safety guideline document.</p>
+  </div>
+
+  <section class="card" aria-labelledby="h-query">
+    <div class="card-head">
+      <h2 id="h-query">Query</h2>
+    </div>
+    <form class="form" id="regulatory-form" novalidate>
+      <div class="field">
+        <label for="f-query">Regulatory Query</label>
+        <input type="text" id="f-query" name="query" autocomplete="off"
+           aria-describedby="h-query-hint"
+           placeholder="What are the storage requirements below -20C?">
+        <p class="hint" id="h-query-hint">A natural-language question answered from the
+          indexed guideline document.</p>
+      </div>
+      <div class="form-error" id="reg-error" role="alert" hidden></div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary" id="btn-retrieve">
+          <span class="btn-label">Retrieve Evidence</span>
+          <span class="spinner" aria-hidden="true"></span>
+        </button>
+      </div>
+    </form>
+  </section>
+
+  <section aria-labelledby="h-chunks">
+    <h2 id="h-chunks" class="section-title">Top <span id="top-k">3</span> Retrieved Chunks</h2>
+    <div class="chunk-list" id="chunk-list"></div>
+  </section>
+
+  <section class="card" aria-labelledby="h-source">
+    <div class="card-head">
+      <h2 id="h-source">Source</h2>
+    </div>
+    <dl class="meta-list">
+      <div><dt>Document</dt><dd>Moderna mRNA Safety Guidelines</dd></div>
+      <div><dt>Availability</dt><dd id="source-availability">Checking&hellip;</dd></div>
+      <div><dt>Path</dt><dd class="mono" id="source-path">&mdash;</dd></div>
+    </dl>
+  </section>
+</section>
+
+<!-- ---------- SAFETY REPORT ---------- -->
+<section class="page" id="page-report" aria-labelledby="h-report" hidden>
+  <div class="page-head">
+    <h1 id="h-report">Structured Safety Report</h1>
+    <p class="page-sub">Generate a validated safety report from model output and retrieved
+      regulatory evidence.</p>
+  </div>
+
+  <section class="card" aria-labelledby="h-report-meta">
+    <div class="card-head">
+      <h2 id="h-report-meta">Report Metadata</h2>
+    </div>
+    <dl class="meta-list">
+      <div><dt>Status</dt><dd id="meta-status">No report generated.</dd></div>
+      <div><dt>Patient ID</dt><dd class="mono" id="meta-patient">&mdash;</dd></div>
+      <div><dt>Schema</dt><dd class="mono" id="meta-schema">ClinicalSafetyReport</dd></div>
+      <div><dt>Generated</dt><dd class="mono" id="meta-generated">&mdash;</dd></div>
+    </dl>
+  </section>
+
+  <section class="card" aria-labelledby="h-structured">
+    <div class="card-head">
+      <h2 id="h-structured">Structured Report</h2>
+      <p class="card-sub">Fields are read from the Pydantic schema. No alternative
+        fields are defined by the interface.</p>
+    </div>
+    <div class="schema-list" id="schema-list"></div>
+  </section>
+
+  <section class="card" aria-labelledby="h-validation">
+    <div class="card-head">
+      <h2 id="h-validation">Validation Status</h2>
+      <p class="card-sub">Schema validation and deterministic safety checks.</p>
+    </div>
+    <ul class="check-list" id="validation-list"></ul>
+  </section>
+
+  <section class="card" aria-labelledby="h-export">
+    <div class="card-head">
+      <h2 id="h-export">Export</h2>
+      <p class="card-sub">Each validated report is written as a matching pair.</p>
+    </div>
+    <div class="form-actions">
+      <button type="button" class="btn btn-secondary" id="btn-export-json" disabled>
+        Export JSON</button>
+      <button type="button" class="btn btn-secondary" id="btn-export-md" disabled>
+        Export Markdown</button>
+      <button type="button" class="btn btn-primary" id="btn-generate-report">
+        <span class="btn-label">Generate Report</span>
+        <span class="spinner" aria-hidden="true"></span>
+      </button>
+    </div>
+    <p class="hint" id="export-hint">Export controls enable once a validated report exists.</p>
+  </section>
+
+  <section class="disclaimer" aria-labelledby="h-disclaimer">
+    <h2 id="h-disclaimer" class="disclaimer-title">
+      <span aria-hidden="true">&#9888;</span> Disclaimer</h2>
+    <p class="disclaimer-text" id="disclaimer-text"></p>
+  </section>
+</section>
+
+<footer class="app-footer">
+  <p><strong>Student Engineering Project</strong> &middot; mRNA Vaccine Intelligence
+    &amp; Protection &middot; Not intended for real clinical use.</p>
+</footer>
+</main>
+
+<!-- ============================= DIALOG ============================= -->
+<dialog class="dialog" id="about-dialog" aria-labelledby="about-title">
+  <h2 id="about-title">About this project</h2>
+  <p>An end-to-end applied AI case study referencing Moderna's public mRNA work:
+    patient-risk modeling, Transformer self-attention mathematics, retrieval over
+    regulatory guidelines, and schema-validated report generation.</p>
+  <p class="dialog-meta" id="about-meta"></p>
+  <p class="dialog-note">This interface is the design layer. Values appear only after
+    the corresponding module produces them. Nothing on screen is simulated.</p>
+  <form method="dialog"><button class="btn btn-secondary">Close</button></form>
+</dialog>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
