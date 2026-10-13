@@ -408,6 +408,13 @@ ATTENTION_RESULTS_PATH: Path = LOGS_DIR / "attention_results.json"
 RETRIEVAL_LOG_JSON_PATH: Path = LOGS_DIR / "retrieval_log.json"
 LATENCY_LOG_JSON_PATH: Path = LOGS_DIR / "latency_log.json"
 
+#: Per-run LLM generation latencies. This is the file dashboard Panel C reads for
+#: its "LLM Report" bar (``load_latency_panel_data``), which is distinct from
+#: LATENCY_LOG_JSON_PATH above - that one holds per-stage pipeline timings, not
+#: report generation times. Declared here so the writer and the reader name the
+#: same constant rather than each spelling the path.
+GENERATION_LOG_JSON_PATH: Path = LOGS_DIR / "generation_log.json"
+
 FIGURE_CONFUSION_MATRIX_FILENAME: str = "confusion_matrix.png"
 FIGURE_CLASSIFICATION_REPORT_FILENAME: str = "classification_report.png"
 FIGURE_ROC_FILENAME: str = "ml_roc_curve.png"

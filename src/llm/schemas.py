@@ -26,12 +26,15 @@ report is valid, but :func:`enforce_safety_constraints` overwrites it with
 
 Status
 ------
-The Pydantic model is defined verbatim from PRD Section 8.3 because the schema
-*is* the specified interface. The validation functions are contracts only.
+Fully implemented. :func:`validate_report`, :func:`parse_llm_json`,
+:func:`extract_dose_bound` and :func:`enforce_safety_constraints` are all real.
+Run ``python -m pytest tests/test_report.py`` to exercise them.
 """
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -193,11 +196,21 @@ def validate_report(payload: dict[str, Any]) -> ClinicalSafetyReport:
 
     Raises
     ------
+    ReportParseError
+        If ``payload`` is not a JSON object, e.g. the model returned a bare list or
+        a string. That is a shape failure the caller retries once, like a
+        validation error.
     pydantic.ValidationError
         If a required field is missing or mistyped. The caller catches this and
         retries exactly once, per FR-4.3.
     """
-    raise NotImplementedError
+    if not isinstance(payload, dict):
+        raise ReportParseError(
+            f"Expected a JSON object at the top level of the report, got "
+            f"{type(payload).__name__}. The model must return an object with the "
+            f"fields {list(REQUIRED_REPORT_FIELDS)}."
+        )
+    return ClinicalSafetyReport(**payload)
 
 
 def enforce_safety_constraints(
@@ -237,8 +250,104 @@ def enforce_safety_constraints(
     -----
     The correction is a hard override, not a suggestion. Prompt instructions
     shape behaviour; this function guarantees the invariant.
+
+    The input report is never mutated: a corrected copy is returned, so a caller
+    holding the pre-enforcement report still has the model's original output for
+    auditing. Which is why :class:`SafetyOutcome` carries both.
     """
-    raise NotImplementedError
+    if bound is None:
+        bound = DoseBound.hard_ceiling()
+
+    violations: list[SafetyViolation] = []
+    updates: dict[str, Any] = {}
+
+    # --- Rule 1: dose bound (FR-4.4) -------------------------------------
+    dose_mg = float(report.Recommended_Dose_mg)
+    bound_mg = bound.max_mg
+
+    if dose_mg < 0:
+        # A negative dose is malformed output, not a regulatory judgement, but it
+        # fails the same deterministic dose rule so it is reported under FR-4.4 -
+        # the only dose-related requirement label the contract defines.
+        violations.append(
+            SafetyViolation(
+                rule="dose_non_negative",
+                detail=(
+                    f"Recommended_Dose_mg was {dose_mg}, which is negative. The "
+                    "value is not a usable dose and was clamped to 0."
+                ),
+                requirement="FR-4.4",
+            )
+        )
+        updates["Recommended_Dose_mg"] = 0.0
+
+    elif bound.exceeds(dose_mg * 1000.0):
+        source = bound.source_text or (
+            f"Ceiling of {bound.max_mcg} {bound.unit} from the retrieved guideline."
+        )
+        violations.append(
+            SafetyViolation(
+                rule="dose_exceeds_guideline_bound",
+                detail=(
+                    f"Recommended_Dose_mg was {dose_mg} mg "
+                    f"({round(dose_mg * 1000.0, 6)} mcg), above the maximum "
+                    f"{bound.max_mcg} mcg established by the retrieved guideline "
+                    f"text. The dose was clamped to {bound_mg} mg and eligibility "
+                    f"was set to false. Guideline evidence: {source}"
+                ),
+                requirement="FR-4.4",
+            )
+        )
+        updates["Recommended_Dose_mg"] = bound_mg
+        updates["Eligible_For_Vaccine"] = False
+
+    # --- Rule 2: disclaimer (FR-4.5) --------------------------------------
+    if not _carries_required_disclaimer(report.Disclaimer):
+        updates["Disclaimer"] = config.REQUIRED_DISCLAIMER
+        violations.append(
+            SafetyViolation(
+                rule="disclaimer_required",
+                detail=(
+                    "Disclaimer did not carry the required student-project notice "
+                    "and was replaced with it verbatim."
+                ),
+                requirement="FR-4.5",
+            )
+        )
+
+    # --- Rule 3: grounding (FR-4.2) ---------------------------------------
+    if not [entry for entry in report.FDA_Safety_Warnings_Cited if entry.strip()]:
+        violations.append(
+            SafetyViolation(
+                rule="citations_required",
+                detail=(
+                    "FDA_Safety_Warnings_Cited was empty, so the recommendation "
+                    "rests on no retrieved guideline excerpt. Recorded as "
+                    "ungrounded rather than silently accepted."
+                ),
+                requirement="FR-4.2",
+            )
+        )
+
+    corrected = report.model_copy(update=updates) if updates else report
+    return SafetyOutcome(
+        report=corrected,
+        violations=violations,
+        overridden=bool(updates),
+    )
+
+
+def _carries_required_disclaimer(text: str) -> bool:
+    """Whether ``text`` already carries the required notice (FR-4.5).
+
+    Compared on whitespace-normalised, casefolded text so a model that
+    re-wrapped or re-cased the sentence is accepted, while a different notice
+    (e.g. "consult a doctor") is replaced with the exact required wording.
+    """
+    if not text or not text.strip():
+        return False
+    normalise = lambda value: " ".join(value.split()).casefold()
+    return normalise(config.REQUIRED_DISCLAIMER) in normalise(text)
 
 
 def extract_dose_bound(
@@ -258,8 +367,112 @@ def extract_dose_bound(
     the report can cite its own evidence. When no explicit numeric bound is
     found, ``default`` (or :meth:`DoseBound.hard_ceiling`) is returned and the
     fallback is recorded rather than silently assumed.
+
+    What counts as an applicable maximum
+    -------------------------------------
+    Two statements in Section 2.1 jointly establish the ceiling:
+
+    * ``primary-series doses commonly fall between 25 and 100 micrograms`` - the
+      stated upper end of the adult reference range.
+    * ``Doses above 100 micrograms are considered high-reactogenicity doses and
+      require secondary clinician review`` - an explicit threshold.
+
+    Only a **threshold that states both a number and the consequence of crossing
+    it** is accepted as an enforceable ceiling. A bare mention of a number is not
+    enough, because "100 micrograms" also appears in contexts that are not dose
+    ceilings. When no such statement is present in the retrieved text, this
+    function refuses to invent one and returns the configured fallback with an
+    empty ``source_text``, which is how a caller can tell an extracted bound from
+    a defaulted one.
     """
-    raise NotImplementedError
+    ceiling_mcg: float | None = None
+    evidence = ""
+
+    for chunk in guideline_chunks or []:
+        for sentence in _sentences(chunk):
+            figures = _microgram_figures(sentence)
+            if not figures:
+                continue
+            # Only a sentence that states a consequence for exceeding a figure
+            # establishes a ceiling; a bare number does not.
+            if not _states_threshold_consequence(sentence):
+                continue
+            candidate = max(figures)
+            if ceiling_mcg is None or candidate > ceiling_mcg:
+                ceiling_mcg = candidate
+                evidence = sentence.strip()
+
+    if ceiling_mcg is not None:
+        return DoseBound(max_mcg=ceiling_mcg, source_text=evidence)
+
+    fallback = default if default is not None else DoseBound.hard_ceiling()
+    # Deliberately drops the fallback's own source_text. That text is a genuine
+    # quotation, but if the bound is being defaulted it was NOT among the chunks
+    # this run retrieved, and presenting it as the retrieved evidence would
+    # misrepresent where the number came from. An empty source_text is the
+    # signal that no applicable maximum was established from the supplied text.
+    return DoseBound(max_mcg=fallback.max_mcg, source_text="", unit=fallback.unit)
+
+
+def _sentences(text: str) -> list[str]:
+    """Split a chunk into sentences, keeping a prepended heading line separate."""
+    lines = (text or "").split("\n")
+    heading = lines[0].strip() if lines else ""
+    body = "\n".join(lines[1:]) if len(lines) > 1 else ""
+
+    parts: list[str] = [heading] if heading else []
+    import re as _re
+
+    _re.sub(r"\n\s*\n+", "\n\n", body)
+    parts.extend(_re.split(r"(?<=[.;:!?])\s+|\n\n", body))
+    return [part.strip() for part in parts if part.strip()]
+
+
+def _microgram_figures(sentence: str) -> list[float]:
+    """Microgram quantities stated in ``sentence``.
+
+    Accepts both range separators the guideline uses ("between 25 and 100
+    micrograms" and "25 to 50 mcg"), matching the reader in
+    :mod:`src.rag.retrieve`. Non-dose sentences return an empty list, so a
+    temperature or a duration is never mistaken for a dose.
+    """
+    import re as _re
+
+    separator = r"(?:to|and|\u2013|-)"
+    pattern = (
+        r"(\d+(?:\.\d+)?)\s*(?:" + separator + r"\s*(\d+(?:\.\d+)?)\s*)?"
+        r"(?:micrograms?|mcg)\b"
+    )
+    figures: list[float] = []
+    for low, high in _re.findall(pattern, sentence, flags=_re.IGNORECASE):
+        figures.append(float(low))
+        if high:
+            figures.append(float(high))
+    return figures
+
+
+def _states_threshold_consequence(sentence: str) -> bool:
+    """Whether the sentence says what happens above a figure.
+
+    Required so a ceiling is only derived from a statement that actually imposes
+    one. "Doses above 100 micrograms ... require secondary clinician review"
+    qualifies; a passing mention of a microgram value does not.
+    """
+    lowered = sentence.lower()
+    markers = (
+        "require",
+        "requires",
+        "required",
+        "review",
+        "prohibit",
+        "not exceed",
+        "maximum",
+        "ceiling",
+        "must not",
+        "high-reactogenicity",
+        "contraindicat",
+    )
+    return any(marker in lowered for marker in markers)
 
 
 def parse_llm_json(raw_response: str) -> dict[str, Any]:
@@ -274,8 +487,69 @@ def parse_llm_json(raw_response: str) -> dict[str, Any]:
     ReportParseError
         If no JSON object can be located, which the caller treats as a validation
         failure and retries once per FR-4.3.
+
+    Notes
+    -----
+    Scans for a *balanced* object rather than regex-matching to the first closing
+    brace, because a guideline excerpt nested inside ``Reasoning_Steps`` will
+    itself contain braces. A brace-counting walk also handles the common case of
+    a fenced block being present alongside prose.
     """
-    raise NotImplementedError
+    text = (raw_response or "").strip()
+    if not text:
+        raise ReportParseError("The model returned an empty response.")
+
+    # A fenced ```json block is the most reliable source when present.
+    fenced = _FENCE_RE.search(text)
+    if fenced:
+        try:
+            parsed = json.loads(fenced.group(1))
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            return parsed
+
+    # Otherwise walk the text for the first balanced top-level object.
+    start = text.find("{")
+    while start != -1:
+        depth = 0
+        in_string = False
+        escaped = False
+        for position in range(start, len(text)):
+            char = text[position]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = text[start : position + 1]
+                    try:
+                        parsed = json.loads(candidate)
+                    except json.JSONDecodeError:
+                        break  # not valid JSON; stop scanning this object
+                    if isinstance(parsed, dict):
+                        return parsed
+                    break
+        start = text.find("{", start + 1)
+
+    raise ReportParseError(
+        "No parsable JSON object was found in the model response. First 200 "
+        f"characters were: {text[:200]!r}"
+    )
+
+
+#: Matches a ```json fenced block, tolerating a bare ``` fence.
+_FENCE_RE = re.compile(r"```(?:json)?\s*(.+?)```", re.DOTALL)
 
 
 class ReportParseError(ValueError):

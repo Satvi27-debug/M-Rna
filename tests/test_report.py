@@ -1193,3 +1193,438 @@ class TestWebInterface:
             exit_code = app.main(["--verify", "--out", str(tmp_path / "absent.png")])
         assert exit_code == 1
         assert '"exists": false' in buffer.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Module 4 - key-free unit tests
+# ---------------------------------------------------------------------------
+#
+# Everything below drives generate_report through the documented `invoke_llm`
+# seam, so none of it needs an API key, a network, or a paid token. The tests
+# that DO require a live key are marked `requires_llm` and skip without one.
+#
+# The brief asks for twelve specific behaviours. Those already asserted above by
+# the pre-existing suite are: valid output passes validation, missing/malformed
+# fields fail, one retry then success, two failures raise, reports persist as a
+# JSON/Markdown pair, the disclaimer is enforced, and the dose bound comes from
+# guideline text with a fallback. The gaps this section closes are numbered in
+# each class docstring.
+
+
+VALID_REPORT_JSON = json.dumps(
+    {
+        "Eligible_For_Vaccine": True,
+        "Recommended_Dose_mg": 0.05,
+        "Reasoning_Steps": ["Within the stated primary-series range."],
+        "FDA_Safety_Warnings_Cited": [
+            "primary-series doses commonly fall between 25 and 100 micrograms"
+        ],
+        "Disclaimer": config.REQUIRED_DISCLAIMER,
+    }
+)
+
+DOSE_CHUNK = (
+    "As a general reference range across mRNA vaccine platforms, primary-series "
+    "doses commonly fall between 25 and 100 micrograms. Doses above 100 "
+    "micrograms are considered high-reactogenicity doses and require secondary "
+    "clinician review before administration."
+)
+
+
+class _FakeLLM:
+    """Records prompts and returns queued responses.
+
+    Shared by the retry tests so each one states only its scenario. Kept as a
+    class rather than a closure so the recorded call count is inspectable after
+    the run.
+    """
+
+    def __init__(self, *responses: str) -> None:
+        self.responses = list(responses)
+        self.calls: list[list[tuple[str, str]]] = []
+
+    def __call__(self, messages, model=None):
+        self.calls.append(messages)
+        if not self.responses:
+            raise AssertionError("invoke_llm was called more times than expected")
+        return self.responses.pop(0)
+
+
+class TestRetryWithoutAnApiKey:
+    """Brief items 5 and 3: a valid first attempt must not retry, and a malformed
+    one must retry exactly once - both proven without an API key.
+
+    ``test_valid_first_response_uses_a_single_attempt`` above covers item 5 but is
+    gated on a real key, so the behaviour would otherwise never be verified in a
+    keyless checkout.
+    """
+
+    def test_valid_first_attempt_does_not_retry(self, monkeypatch) -> None:
+        fake = _FakeLLM(VALID_REPORT_JSON)
+        monkeypatch.setattr(report_generator, "invoke_llm", fake)
+        run = report_generator.generate_report("Low", 0.12, [DOSE_CHUNK], "40-year-old")
+        assert len(fake.calls) == 1, "a valid first response must not be retried"
+        assert len(run.attempts) == 1
+        assert run.attempts[0].succeeded is True
+
+    def test_retry_receives_the_validation_errors_from_the_first_attempt(
+        self, monkeypatch
+    ) -> None:
+        """The retry has to be told what was wrong, or it is just a second guess.
+
+        A retry that repeats the identical prompt has no way to do better, so the
+        corrected request must carry the field-level failures from attempt 1.
+        """
+        bad = json.dumps({"Eligible_For_Vaccine": True, "Recommended_Dose_mg": 0.05})
+        fake = _FakeLLM(bad, VALID_REPORT_JSON)
+        monkeypatch.setattr(report_generator, "invoke_llm", fake)
+
+        run = report_generator.generate_report("Low", 0.1, [DOSE_CHUNK], "40-year-old")
+
+        assert len(fake.calls) == 2
+        retry_prompt = " ".join(content for _, content in fake.calls[1])
+        assert "Reasoning_Steps" in retry_prompt or "validation" in retry_prompt.lower()
+        assert run.attempts[0].failure_reason
+        assert "Reasoning_Steps" in run.attempts[0].failure_reason
+
+    def test_two_total_attempts_is_the_hard_ceiling(self, monkeypatch) -> None:
+        """FR-4.3: never a third attempt, however tempting."""
+        fake = _FakeLLM("nope", "still nope", VALID_REPORT_JSON)
+        monkeypatch.setattr(report_generator, "invoke_llm", fake)
+        with pytest.raises(report_generator.ReportGenerationError):
+            report_generator.generate_report("Low", 0.1, [DOSE_CHUNK], "40-year-old")
+        assert len(fake.calls) == 2, "FR-4.3 permits exactly two attempts total"
+
+
+class TestApiConfiguration:
+    """Brief items 6 and 7: missing credentials and provider failures surface."""
+
+    @staticmethod
+    def _clear_keys(monkeypatch):
+        for variable in ("LLM_API_KEY", "OPENAI_API_KEY"):
+            monkeypatch.delenv(variable, raising=False)
+        # Neutralise .env so the outcome does not depend on whether the developer
+        # has a local .env file. This test is about the error path, not about .env.
+        monkeypatch.setattr(report_generator, "_load_dotenv_once", lambda: None)
+
+    def test_missing_key_raises_an_actionable_error(self, monkeypatch) -> None:
+        self._clear_keys(monkeypatch)
+        with pytest.raises(report_generator.MissingAPIKeyError) as excinfo:
+            report_generator.load_api_key()
+        message = str(excinfo.value)
+        assert "LLM_API_KEY" in message
+        assert ".env" in message
+
+    def test_missing_key_message_never_echoes_a_secret(self, monkeypatch) -> None:
+        """A key present in one variable must not leak into another's error."""
+        self._clear_keys(monkeypatch)
+        monkeypatch.setenv("SOME_OTHER_TOKEN", "super-secret-value")
+        with pytest.raises(report_generator.MissingAPIKeyError) as excinfo:
+            report_generator.load_api_key()
+        assert "super-secret-value" not in str(excinfo.value)
+
+    def test_a_configured_key_is_returned_not_logged(self, monkeypatch) -> None:
+        monkeypatch.setenv("LLM_API_KEY", "test-key-value")
+        assert report_generator.load_api_key() == "test-key-value"
+
+    def test_importing_the_module_needs_no_key(self) -> None:
+        """Regression guard for the contract that made these tests possible."""
+        assert "load_api_key" not in repr(report_generator)
+        assert callable(report_generator.generate_report)
+
+    def test_provider_failure_raises_rather_than_fabricating(self, monkeypatch) -> None:
+        """Brief item 7: an API error must never become a successful report."""
+        def explode(messages, model=None):
+            raise RuntimeError("Connection reset by peer")
+
+        monkeypatch.setattr(report_generator, "invoke_llm", explode)
+        with pytest.raises(report_generator.LLMCallError) as excinfo:
+            report_generator.generate_report("Low", 0.1, [DOSE_CHUNK], "40-year-old")
+        assert "Connection reset by peer" in str(excinfo.value)
+
+    def test_provider_failure_is_not_charged_to_the_validation_retry(self, monkeypatch) -> None:
+        """A credential or network fault is not the model's fault.
+
+        Retrying it would spend the single FR-4.3 retry and then report the
+        problem as a schema failure, hiding the real cause.
+        """
+        calls = []
+
+        def explode(messages, model=None):
+            calls.append(messages)
+            raise RuntimeError("401 Unauthorized")
+
+        monkeypatch.setattr(report_generator, "invoke_llm", explode)
+        with pytest.raises(report_generator.LLMCallError):
+            report_generator.generate_report("Low", 0.1, [DOSE_CHUNK], "40-year-old")
+        assert len(calls) == 1, "an API error must not consume the validation retry"
+
+    def test_api_error_and_validation_error_are_distinguishable(self) -> None:
+        """The two failure classes need different remediation, so different types."""
+        assert not issubclass(report_generator.LLMCallError, report_generator.ReportGenerationError)
+        assert not issubclass(report_generator.ReportGenerationError, report_generator.LLMCallError)
+
+
+class TestDoseHonesty:
+    """Brief items 11 and 12: reject only on a maximum the source establishes,
+    and invent no threshold when it does not."""
+
+    def test_ceiling_is_derived_from_the_retrieved_text(self) -> None:
+        bound = schemas.extract_dose_bound([DOSE_CHUNK])
+        assert bound.max_mcg == pytest.approx(100.0)
+        assert bound.source_text, "a derived bound must carry the sentence it came from"
+        assert "100 micrograms" in bound.source_text
+
+    def test_a_bare_number_is_not_treated_as_a_ceiling(self) -> None:
+        """A microgram value with no stated consequence is not a limit.
+
+        Without the consequence requirement, any mention of a dose would become an
+        enforceable ceiling - including one the document never called a maximum.
+        """
+        bound = schemas.extract_dose_bound(
+            ["The formulation contains 50 micrograms of active material per dose."]
+        )
+        assert bound.source_text == "", "a bare figure must not be cited as a limit"
+        assert bound.max_mcg == config.GUIDELINE_HARD_DOSE_CEILING_MCG
+
+    def test_no_text_at_all_yields_a_defaulted_bound(self) -> None:
+        bound = schemas.extract_dose_bound([])
+        assert bound.max_mcg == config.GUIDELINE_HARD_DOSE_CEILING_MCG
+        assert bound.source_text == ""
+
+    def test_defaulted_bound_is_not_presented_as_retrieved_evidence(self) -> None:
+        """The limitation must be explicit, not silently papered over."""
+        bound = schemas.extract_dose_bound(["The product should be stored cold."])
+        payload = {
+            "derived_from_guideline": bool(bound.source_text),
+            "max_mcg": bound.max_mcg,
+        }
+        assert payload["derived_from_guideline"] is False
+
+    def test_above_ceiling_reports_eligibility_false_in_the_output(self) -> None:
+        """FR-4.4's stated acceptance criterion, end to end through the generator."""
+        report = schemas.ClinicalSafetyReport(
+            Eligible_For_Vaccine=True,
+            Recommended_Dose_mg=0.12,  # 120 mcg against a 100 mcg ceiling
+            Reasoning_Steps=["Above the stated maximum."],
+            FDA_Safety_Warnings_Cited=["Doses above 100 micrograms require review."],
+            Disclaimer=config.REQUIRED_DISCLAIMER,
+        )
+        outcome = schemas.enforce_safety_constraints(report, schemas.extract_dose_bound([DOSE_CHUNK]))
+        assert outcome.report.Eligible_For_Vaccine is False
+
+    def test_rejection_cannot_be_bypassed_by_the_model_approving_the_dose(self) -> None:
+        """Even with perfect compliance language, the code still rejects."""
+        report = schemas.ClinicalSafetyReport(
+            Eligible_For_Vaccine=True,
+            Recommended_Dose_mg=0.5,
+            Reasoning_Steps=[
+                "The guideline permits this dose and the patient is low risk."
+            ],
+            FDA_Safety_Warnings_Cited=[DOSE_CHUNK],
+            Disclaimer=config.REQUIRED_DISCLAIMER,
+        )
+        outcome = schemas.enforce_safety_constraints(report, schemas.extract_dose_bound([DOSE_CHUNK]))
+        assert outcome.report.Eligible_For_Vaccine is False
+        assert outcome.report.Recommended_Dose_mg <= 0.1
+        assert any(v.requirement == "FR-4.4" for v in outcome.violations)
+
+
+def _make_run(patient_id: str | None = None) -> report_generator.ReportRun:
+    """A validated, safety-checked run, for the persistence and latency tests.
+
+    Module level rather than a ``staticmethod`` on one test class, so the later
+    classes can build the same object without reaching into an unrelated one.
+    """
+    report = schemas.ClinicalSafetyReport(
+        Eligible_For_Vaccine=True,
+        Recommended_Dose_mg=0.05,
+        Reasoning_Steps=["Within the stated range."],
+        FDA_Safety_Warnings_Cited=["between 25 and 100 micrograms"],
+        Disclaimer=config.REQUIRED_DISCLAIMER,
+    )
+    return report_generator.ReportRun(
+        report=report,
+        safety=schemas.enforce_safety_constraints(
+            report, schemas.DoseBound(max_mcg=100.0)
+        ),
+        attempts=[report_generator.GenerationAttempt(1, True, latency_s=0.9)],
+        dose_bound=schemas.DoseBound(max_mcg=100.0, source_text=DOSE_CHUNK),
+        patient_id=patient_id,
+    )
+
+
+class TestReportPersistence:
+    """Brief items 8, 9 and 10: JSON + Markdown, no overwriting, exact disclaimer."""
+
+    _run = staticmethod(_make_run)
+
+    def test_json_carries_the_structured_validated_report(self, tmp_path) -> None:
+        json_path, _ = report_generator.persist_report(self._run(), tmp_path)
+        stored = json.loads(json_path.read_text(encoding="utf-8"))
+        assert set(stored["report"]) == set(schemas.REQUIRED_REPORT_FIELDS)
+        assert stored["report"]["Eligible_For_Vaccine"] is True
+        assert stored["report"]["Recommended_Dose_mg"] == pytest.approx(0.05)
+        assert stored["safety"]["compliant"] is True
+        assert stored["generation"]["attempts"][0]["attempt_number"] == 1
+
+    def test_markdown_carries_the_exact_disclaimer(self, tmp_path) -> None:
+        _, md_path = report_generator.persist_report(self._run(), tmp_path)
+        markdown = md_path.read_text(encoding="utf-8")
+        assert config.REQUIRED_DISCLAIMER in markdown
+        assert "between 25 and 100 micrograms" in markdown
+
+    def test_repeated_reports_never_overwrite(self, tmp_path) -> None:
+        """Brief item 9: each run must leave the earlier report intact."""
+        first_json, first_md = report_generator.persist_report(self._run("P0001"), tmp_path)
+        first_body = first_md.read_text(encoding="utf-8")
+
+        second_json, second_md = report_generator.persist_report(self._run("P0001"), tmp_path)
+
+        assert first_json != second_json and first_md != second_md
+        assert first_md.read_text(encoding="utf-8") == first_body, (
+            "the first report was modified by the second run"
+        )
+        assert first_json.exists() and second_json.exists()
+        assert len(list(tmp_path.glob("*.json"))) == 2
+        assert len(list(tmp_path.glob("*.md"))) == 2
+
+    def test_reports_from_different_patients_do_not_collide(self, tmp_path) -> None:
+        first, _ = report_generator.persist_report(self._run("P0001"), tmp_path)
+        second, _ = report_generator.persist_report(self._run("P0002"), tmp_path)
+        assert first.stem != second.stem
+
+    def test_patient_id_is_used_in_the_filename(self, tmp_path) -> None:
+        json_path, _ = report_generator.persist_report(self._run("P0042"), tmp_path)
+        assert "P0042" in json_path.stem
+
+    def test_filename_stem_is_sanitised(self, tmp_path) -> None:
+        """A patient id from a dataset must not become a path component."""
+        json_path, _ = report_generator.persist_report(self._run("../../escape"), tmp_path)
+        assert json_path.parent == tmp_path
+        assert ".." not in json_path.name
+
+    def test_reports_directory_is_created_when_absent(self, tmp_path) -> None:
+        target = tmp_path / "nested" / "reports"
+        assert not target.exists()
+        json_path, md_path = report_generator.persist_report(self._run(), target)
+        assert json_path.exists() and md_path.exists()
+
+    def test_unwritable_directory_raises_oserror(self, tmp_path) -> None:
+        blocker = tmp_path / "blocked"
+        blocker.write_text("not a directory", encoding="utf-8")
+        with pytest.raises(OSError):
+            report_generator.persist_report(self._run(), blocker / "reports")
+
+
+class TestGroundingIntegrity:
+    """The prompt must not smuggle the target or any invented clinical value."""
+
+    def test_target_column_is_never_restated_into_the_prompt(self) -> None:
+        """Leaking Reaction_Score would let the model copy the label.
+
+        The record below carries the ground truth. If it reached the prompt the
+        model could restate it as a "prediction", and every report would look
+        confident for the wrong reason.
+        """
+        record = {
+            "Patient_ID": "P0001", "Age": 58, "Biomarker_Level": 11.2,
+            "Pre_Existing_Conditions": 2, "Vaccine_Dose_mcg": 120.0,
+            "Prior_Reaction_History": "Mild",
+            "Reaction_Score": 1,
+        }
+        summary = report_generator.summarise_patient(record)
+        assert config.TARGET_COL not in summary
+        assert config.TARGET_COL not in report_generator.PATIENT_SUMMARY_FIELDS
+
+    def test_absent_fields_are_omitted_not_defaulted(self) -> None:
+        summary = report_generator.summarise_patient({"Age": 30})
+        assert "30" in summary
+        assert "Biomarker" not in summary, "a missing field must not be invented"
+
+    def test_prompt_separates_retrieved_evidence_from_model_output(self) -> None:
+        """FR-4.2 is judged by inspecting this prompt, so the boundary is explicit."""
+        messages = report_generator.build_prompt("High", 0.82, ["chunk text"], "a patient")
+        user = next(content for role, content in messages if role == "user")
+        assert "RETRIEVED GUIDELINE EVIDENCE" in user
+        assert "MODEL RISK OUTPUT" in user
+        assert "NOT a clinical outcome" in user
+
+    def test_prompt_names_the_source_document(self) -> None:
+        messages = report_generator.build_prompt("Low", 0.1, ["chunk"], "a patient")
+        user = next(content for role, content in messages if role == "user")
+        assert config.GUIDELINE_DOCUMENT_NAME in user
+
+    def test_system_prompt_forbids_inventing_facts(self) -> None:
+        text = report_generator.SYSTEM_PROMPT.lower()
+        assert "never invent" in text
+        assert "insufficient" in text
+
+    def test_report_is_json_serialisable(self, tmp_path) -> None:
+        json_path, _ = report_generator.persist_report(_make_run(), tmp_path)
+        reloaded = json.loads(json_path.read_text(encoding="utf-8"))
+        assert reloaded["disclaimer"] == config.REQUIRED_DISCLAIMER
+
+
+class TestLatencyRecording:
+    """Panel C's LLM bar depends on this file being written in the expected shape."""
+
+    def test_generation_log_is_appended_not_overwritten(self, tmp_path) -> None:
+        path = tmp_path / "generation_log.json"
+        for _ in range(3):
+            report_generator.record_generation_latency(_make_run(), path)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert len(payload["entries"]) == 3
+        assert all(e["latency_s"] > 0 for e in payload["entries"])
+        assert payload["entries"][0]["model"] == config.LLM_MODEL
+
+    def test_generation_log_shape_matches_the_panel_reader(self, tmp_path) -> None:
+        """The dashboard reads entries[].latency_s; a different shape renders blank."""
+        path = tmp_path / "generation_log.json"
+        report_generator.record_generation_latency(_make_run(), path)
+        entry = json.loads(path.read_text(encoding="utf-8"))["entries"][0]
+        assert isinstance(entry["latency_s"], (int, float))
+
+    def test_an_unparsable_existing_log_is_replaced_not_fatal(self, tmp_path) -> None:
+        """A corrupt log must not abort a report that already succeeded."""
+        path = tmp_path / "generation_log.json"
+        path.write_text("{not json", encoding="utf-8")
+        report_generator.record_generation_latency(_make_run(), path)
+        assert json.loads(path.read_text(encoding="utf-8"))["entries"]
+
+
+class TestScopeGuard:
+    """This stage must not reach beyond report generation."""
+
+    def test_llm_package_does_not_orchestrate_the_pipeline(self) -> None:
+        """AST-based, so a docstring mentioning the pipeline is not a violation.
+
+        ``report_generator`` legitimately refers to :mod:`src.pipeline` in prose -
+        pipeline orchestration is a later stage that *calls* this module, so an
+        import in the other direction is what must be absent.
+        """
+        import ast
+        from pathlib import Path
+
+        for path in Path(report_generator.__file__).parent.glob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                modules = []
+                if isinstance(node, ast.ImportFrom) and node.level == 0:
+                    modules = [node.module or ""]
+                elif isinstance(node, ast.Import):
+                    modules = [alias.name for alias in node.names]
+                for module in modules:
+                    assert not module.startswith("src.pipeline"), (
+                        f"{path.name} imports {module}; orchestration is a later stage"
+                    )
+
+    def test_no_api_key_is_hardcoded(self) -> None:
+        import re
+        from pathlib import Path
+
+        pattern = re.compile(r"sk-[A-Za-z0-9]{16,}")
+        for path in Path(report_generator.__file__).parent.glob("*.py"):
+            assert not pattern.search(path.read_text(encoding="utf-8")), (
+                f"{path.name} appears to contain a hardcoded key"
+            )

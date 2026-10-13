@@ -696,7 +696,121 @@ a different one — vectors from different models are not comparable.
 
 ---
 
-## 10. Running the project
+## 10. Module 4 — LLM + Pydantic structured safety report
+
+Implemented. `gpt-4o-mini` via LangChain `ChatOpenAI`, every response schema-validated.
+
+### Document
+
+No new document. The grounding is `guidelines/Moderna_mRNA_Safety_Guidelines.docx`
+as retrieved by Module 3 — the LLM is never asked to supply regulatory text.
+
+### Process
+
+```
+patient record (patient_records.csv)
+   + Module 1 risk band + P(Reaction_Score = 1)
+   + Module 3 top-3 retrieved chunks
+            ↓
+   build_prompt()          labels each block's origin (FR-4.2)
+            ↓
+   ChatOpenAI → raw text
+            ↓
+   parse_llm_json()        tolerates fences and prose
+            ↓
+   validate_report()       Pydantic, 5 fields (FR-4.1)
+            ↓  on failure: retry exactly ONCE (FR-4.3)
+            ↓
+   enforce_safety_constraints()   deterministic, cannot be overridden (FR-4.4/4.5)
+            ↓
+   persist_report()        .json + .md pair (FR-4.6)
+```
+
+### The five required fields (FR-4.1, PRD §8.3)
+
+`Eligible_For_Vaccine` (bool) · `Recommended_Dose_mg` (float) · `Reasoning_Steps`
+(List[str]) · `FDA_Safety_Warnings_Cited` (List[str]) · `Disclaimer` (str).
+Four are mandatory; a missing or mistyped field raises `ValidationError`.
+
+### Why safety rules are code, not prompt wording
+
+The prompt asks the model to respect the retrieved dose bounds. That cannot be
+relied on to satisfy an acceptance test, so `enforce_safety_constraints` verifies
+and overrides it in Python. Verified end to end: a model output claiming
+`Eligible_For_Vaccine=True` at **500 mcg** is rewritten to `False` with the dose
+clamped to **0.1 mg** and an `FR-4.4` violation recorded.
+
+### Dose bound provenance
+
+The ceiling is **read out of the retrieved text**, not configured. Only a sentence
+stating both a microgram figure *and* a consequence for crossing it counts as an
+enforceable ceiling — so `"contains 50 micrograms of active material"` is correctly
+rejected as a limit, while `"Doses above 100 micrograms … require secondary
+clinician review"` is accepted. Measured on the real index: ceiling **100 mcg**,
+evidence sentence carried through.
+
+When no applicable maximum can be established from the retrieved text, the
+function **defaults rather than invents**, and returns an empty `source_text` so
+callers can tell a derived bound from a defaulted one. The dashboard reports
+`dose_bound: null` for the same reason.
+
+### Retry policy (FR-4.3)
+
+Exactly **two total attempts**. The retry prompt carries the field-level
+validation errors from attempt 1, because a retry with an identical prompt cannot
+do better.
+
+API failures are handled **separately** and are *not* charged to the validation
+retry: a credential or network fault raises `LLMCallError` immediately, rather
+than burning the retry and then reporting the problem as a schema failure.
+
+### Credentials
+
+`LLM_API_KEY` (or `OPENAI_API_KEY`) is read from the environment **at call time**,
+never at import time. Missing → `MissingAPIKeyError` naming the variable and the
+`.env` path. The key is never logged and never appears in an exception message.
+
+### Measured results
+
+Mocked `invoke_llm`, real ML prediction and real retrieval:
+
+| Check | Result |
+|---|---|
+| Patient P0001, real model | Low risk, P(Reaction_Score=1) = 0.3320 |
+| Retrieved chunks / bounds | 3 · [25.0, 50.0, 100.0] mcg |
+| Dose bound derived from text | 100.0 mcg, evidence sentence captured |
+| LLM calls / attempts | 1 / 1 (validated first try) |
+| 83.5 mcg dose | eligible **True**, compliant |
+| 500 mcg hostile output | eligible **False**, clamped 0.1 mg, `FR-4.4` |
+| Persisted pair | `P0001-<UTC timestamp>.json` / `.md`, disclaimer exact |
+| Repeat runs | unique filenames, earlier report byte-identical |
+
+### Known environment issue: ML + RAG in one process
+
+On this Windows machine, loading a scikit-learn model and then performing **any**
+ChromaDB HNSW operation (including `collection.count()`) terminates the process with
+an access violation (`0xC0000005`). Reproducible in that order; **not** avoided by
+`KMP_DUPLICATE_LIB_OK=TRUE`. A native conflict between scikit-learn's BLAS runtime
+and ChromaDB's Rust HNSW extension.
+
+Module 4 is unaffected — it loads neither library. The end-to-end check above runs
+ML and RAG in separate processes for that reason. **The pipeline stage that combines
+all modules in one interpreter will hit this**, and a process boundary is the
+workaround.
+
+### Commands
+
+```powershell
+python -m pytest tests/test_report.py          # 172 passed, 3 skipped (keyless)
+python -m pytest                               # 536 passed, 3 skipped
+```
+
+No API key, network, or paid token is needed: every unit test patches
+`invoke_llm`, the single network seam. Tests needing a live key skip explicitly.
+
+---
+
+## 11. Running the project
 
 ### Training (Module 1)
 
@@ -783,7 +897,7 @@ reproducible.
 
 ---
 
-## 11. Source documents
+## 12. Source documents
 
 | File | Role |
 |---|---|
@@ -798,7 +912,7 @@ verified rather than assumed.
 
 ---
 
-## 12. Security
+## 13. Security
 
 * No API key, token or credential appears anywhere in this repository.
 * Secrets are read from environment variables inside the function that needs them.
