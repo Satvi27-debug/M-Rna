@@ -93,8 +93,18 @@ def run(verbose: bool = True) -> dict[str, Any]:
         print(f"  Biomarker_Level median (imputed)     : {medians.get('Biomarker_Level')}")
         print(f"  Prior_Reaction_History mode (imputed): {modes.get('Prior_Reaction_History')}")
 
-    # -- 5-6. split, then fit preprocessing on train only ------------------
-    split = preprocessing.stratified_train_test_split(cleaned)
+    # -- 5-6. split on RAW rows, then fit preprocessing on train only ------
+    # The split takes the **raw** frame, not ``cleaned``. Passing the pre-imputed
+    # frame leaked the held-out test rows into the fitted imputer: with no missing
+    # values left, the transformer had nothing to estimate and settled on whatever
+    # the whole-dataset pass had already filled in. On this dataset that made
+    # Biomarker_Level's imputed value 4.82 (all-data median) instead of 4.81
+    # (train-only), which is test-set leakage.
+    #
+    # ``stratified_train_test_split`` fits its own imputation statistics from the
+    # training rows, so the cleaning pass above stays as a *report* of what the
+    # data needs rather than a source of statistics the model is fitted on.
+    split = preprocessing.stratified_train_test_split(raw)
     if verbose:
         _banner("STEP 5-6  SPLIT AND FIT PREPROCESSING (TRAIN ONLY)")
         print(f"Train rows: {split.n_train}   Test rows: {split.n_test}   "

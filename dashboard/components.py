@@ -686,6 +686,24 @@ def _report_schema_fields() -> list[dict[str, str]]:
     return fields
 
 
+def _risk_model_available() -> bool:
+    """Whether a trained risk model exists on disk.
+
+    Checks ``config.SELECTED_MODEL_PATH`` - the artifact ``save_model_artifacts``
+    actually writes for the FR-1.7 winner - rather than ``RISK_MODEL_PATH``.
+
+    ``RISK_MODEL_PATH`` is the PRD's *acceptance-criteria* filename, kept as a read
+    alias in ``src.ml.predict``. Nothing in the codebase writes it, so testing it
+    here reported the Risk Model stage "not initialized" on a correctly trained
+    project. Accepts either so a project carrying the legacy name still reads
+    truthfully.
+    """
+    return any(
+        Path(path).is_file()
+        for path in (config.SELECTED_MODEL_PATH, config.RISK_MODEL_PATH)
+    )
+
+
 def stage_status() -> list[dict[str, str]]:
     """Report the true readiness of each pipeline stage.
 
@@ -706,7 +724,7 @@ def stage_status() -> list[dict[str, str]]:
             "Source dataset missing.",
         ),
         "risk-model": (
-            config.RISK_MODEL_PATH.exists(),
+            _risk_model_available(),
             "Trained classifier available.",
             "Run model training to enable this stage.",
         ),
@@ -782,7 +800,7 @@ def platform_state() -> dict[str, Any]:
         "stages": stages,
         "artifacts": {
             **artifacts,
-            "model": config.RISK_MODEL_PATH.exists(),
+            "model": _risk_model_available(),
             "index": _directory_has_content(config.CHROMA_PERSIST_DIR),
             "report": _directory_has_content(config.REPORTS_DIR),
             "dataset": config.RAW_PATIENT_CSV.exists(),

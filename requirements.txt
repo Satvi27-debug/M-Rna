@@ -6,6 +6,7 @@
 #   torch                        -> PyTorch parity check for src/attention
 #   matplotlib, seaborn          -> src/attention, src/ml, dashboard
 #   langchain, langchain-community, langchain-openai -> src/rag, src/llm
+#   langchain-text-splitters                       -> chunking in src/rag/ingest.py
 #   chromadb, sentence-transformers                   -> src/rag
 #   pydantic                                        -> src/llm/schemas.py
 #   joblib                                         -> src/ml model artifacts
@@ -32,6 +33,12 @@ seaborn>=0.12
 # --- Module 3: retrieval index ------------------------------------------
 langchain>=0.1
 langchain-community>=0.0.20
+# src/rag/ingest.py imports RecursiveCharacterTextSplitters directly. Nothing
+# else pulls this in: langchain 1.x is a meta-package that requires
+# langchain-core but NOT langchain-text-splitters, and only langchain-classic
+# (which this project does not use) depends on it. Without this line a clean
+# `pip install -r requirements.txt` fails at guideline ingestion.
+langchain-text-splitters>=0.2
 chromadb>=0.4
 sentence-transformers>=2.2
 

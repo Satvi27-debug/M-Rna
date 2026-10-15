@@ -509,6 +509,57 @@ class TestSplitReproducibility:
         with pytest.raises(preprocessing.InvalidTargetError):
             preprocessing.stratified_train_test_split(single)
 
+    @requires_implementation(preprocessing.stratified_train_test_split)
+    def test_imputer_median_is_the_train_only_median_not_the_full_data_median(
+        self,
+    ) -> None:
+        """The fitted median must come from the training rows.
+
+        Uses the **raw** frame rather than this class's ``_split()`` fixture. That
+        fixture pre-imputes the whole dataset first, so by the time the split runs
+        no value is missing and the all-data median and train-only median coincide
+        in what the split can observe. Starting from raw rows is the case where the
+        distinction is meaningful.
+
+        ``n_samples_seen_`` above is a row *count*, so it cannot tell a correct
+        train-only median from a wrong all-data one. This asserts the statistic.
+
+        On this dataset ``Biomarker_Level`` is the discriminator: train median
+        4.81, full-data median 4.82. ``Age`` also differs (50.5 vs 51.0);
+        ``Vaccine_Dose_mcg`` is identical either way.
+        """
+        raw = preprocessing.load_raw_records(config.RAW_PATIENT_CSV)
+        split = preprocessing.stratified_train_test_split(raw)
+        train = raw.loc[split.train_index]
+
+        imputer = split.preprocessor.column_transformer.named_transformers_[
+            "numeric"
+        ].named_steps["imputer"]
+        stored = dict(zip(config.NUMERIC_COLS, imputer.statistics_))
+
+        discriminating = 0
+        for column in config.NUMERIC_COLS:
+            train_median = float(train[column].median())
+            full_median = float(raw[column].median())
+            assert stored[column] == pytest.approx(train_median, abs=1e-9), (
+                f"{column} imputer statistic {stored[column]} does not match the "
+                f"train-only median ({train_median})"
+            )
+            if abs(train_median - full_median) > 1e-9:
+                discriminating += 1
+                assert stored[column] != pytest.approx(full_median, abs=1e-9), (
+                    f"{column} was imputed with the FULL-DATA median "
+                    f"({full_median}) instead of the train-only median "
+                    f"({train_median}) - the held-out test set leaked into the "
+                    "fitted imputer"
+                )
+
+        # Guards against the assertions above being vacuous.
+        assert discriminating >= 1, (
+            "no column distinguishes train-only from full-data medians, so this "
+            "test cannot detect a leak on the current dataset"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Persistence

@@ -52,9 +52,19 @@ def cleaned_frame(raw_frame) -> pd.DataFrame:
 
 
 @pytest.fixture(scope="module")
-def split(cleaned_frame) -> preprocessing.SplitData:
-    """The stratified 80/20 split with preprocessing fitted on train only."""
-    return preprocessing.stratified_train_test_split(cleaned_frame)
+def split(raw_frame) -> preprocessing.SplitData:
+    """The stratified 80/20 split with preprocessing fitted on train only.
+
+    Takes the **raw** frame, not ``cleaned_frame``. Splitting a pre-imputed frame
+    leaves nothing missing for the transformer to estimate, so it silently adopted
+    the whole-dataset medians - which put the held-out test rows into the fitted
+    imputer (Biomarker_Level 4.82 instead of the train-only 4.81). Because this
+    fixture feeds ``save_model_artifacts``, the leak was not confined to the tests:
+    it reached the shipped models.
+
+    The split fits its own imputation statistics from the training rows.
+    """
+    return preprocessing.stratified_train_test_split(raw_frame)
 
 
 @pytest.fixture(scope="module")
@@ -358,6 +368,167 @@ class TestSelection:
             assert label in text
         for forbidden in ("safe", "approved", "clinically recommended", "diagnosis"):
             assert forbidden not in text, f"selection rationale implies '{forbidden}'"
+
+
+# ---------------------------------------------------------------------------
+# Artifact fidelity (added after the final audit)
+# ---------------------------------------------------------------------------
+
+
+class TestTrainedArtifactFidelity:
+    """The saved model artifacts must match the current training code.
+
+    Added after an audit found the committed artifacts fitted with the
+    **full-data** median for ``Biomarker_Level`` (4.82) while the code produces the
+    train-only median (4.81) - a silent test-set leak baked into the artifact. The
+    code was already correct; the artifacts predated that fix.
+
+    These tests inspect what was actually fitted rather than trusting the metrics
+    file, which is what let the mismatch go unnoticed.
+    """
+
+    #: Artifacts ``save_model_artifacts`` actually writes. ``risk_model.joblib`` is
+    #: deliberately absent: no code path writes it, and a lingering copy can shadow
+    #: the real model - see ``test_no_unwritten_artifact_shadows_the_selected_model``.
+    ARTIFACTS = (
+        "logistic_regression.joblib",
+        "random_forest.joblib",
+        "selected_model.joblib",
+    )
+
+    @staticmethod
+    def _train_only_medians() -> dict:
+        split = preprocessing.stratified_train_test_split(
+            preprocessing.load_raw_records(config.RAW_PATIENT_CSV)
+        )
+        return {
+            column: float(split.train_raw[column].median())
+            for column in config.NUMERIC_COLS
+        }
+
+    @pytest.mark.parametrize("name", ARTIFACTS)
+    def test_artifact_imputer_used_train_only_statistics(self, name) -> None:
+        """Every saved artifact must carry the train-only medians.
+
+        ``n_samples_seen_`` elsewhere proves the *row count*; this proves the
+        *values*. A stale artifact fitted on the full dataset fails here even when
+        its row count is right.
+        """
+        path = config.MODELS_DIR / name
+        if not path.is_file():
+            from tests import requires_artifact
+
+            requires_artifact(path, "python -m src.ml")
+
+        import joblib
+
+        numeric = joblib.load(path).named_steps["preprocess"].named_transformers_[
+            "numeric"
+        ]
+        stored = dict(
+            zip(config.NUMERIC_COLS, numeric.named_steps["imputer"].statistics_)
+        )
+
+        train_only = self._train_only_medians()
+        raw = preprocessing.load_raw_records(config.RAW_PATIENT_CSV)
+
+        for column, expected in train_only.items():
+            assert stored[column] == pytest.approx(expected, abs=1e-6), (
+                f"{name} has {column}={stored[column]} but the train-only median "
+                f"is {expected}. The artifact is stale; retrain with: python -m src.ml"
+            )
+            full = float(raw[column].median())
+            if abs(expected - full) > 1e-9:
+                assert stored[column] != pytest.approx(full, abs=1e-6), (
+                    f"{name} imputes {column} with the FULL-DATA median ({full}) "
+                    f"rather than the train-only median ({expected}) - the "
+                    "held-out test set leaked into the fitted imputer"
+                )
+
+    def test_artifact_scaler_saw_only_training_rows(self) -> None:
+        """The row-count guard, applied to what is actually on disk.
+
+        Uses ``SELECTED_MODEL_PATH`` - the artifact ``save_model_artifacts`` writes
+        for the FR-1.7 winner. ``RISK_MODEL_PATH`` is a read alias that no code
+        path writes, so it may legitimately be absent.
+        """
+        from tests import requires_artifact
+
+        requires_artifact(config.SELECTED_MODEL_PATH, "python -m src.ml")
+
+        import joblib
+
+        scaler = joblib.load(config.SELECTED_MODEL_PATH).named_steps[
+            "preprocess"
+        ].named_transformers_["numeric"].named_steps["scaler"]
+        seen = int(np.asarray(scaler.n_samples_seen_).ravel()[0])
+        expected = int(round(len(preprocessing.load_raw_records(
+            config.RAW_PATIENT_CSV)) * (1 - config.TEST_SIZE)))
+        assert seen == expected, (
+            f"scaler saw {seen} rows, expected {expected} (the training split)"
+        )
+
+    def test_no_unwritten_artifact_shadows_the_selected_model(self) -> None:
+        """``models/risk_model.joblib`` must not linger beside the real artifact.
+
+        Nothing in the codebase writes that filename - it is the PRD's acceptance
+        criteria path, kept as a read alias. A copy that survives a retrain can be
+        served as the current model while carrying statistics from an older run,
+        which is exactly how a leaked model outlived its own fix.
+        """
+        from tests import requires_artifact
+
+        requires_artifact(config.SELECTED_MODEL_PATH, "python -m src.ml")
+
+        legacy = config.MODELS_DIR / "risk_model.joblib"
+        assert not legacy.is_file() or ml_predict._is_current(legacy), (
+            "models/risk_model.joblib exists but is not byte-identical to the "
+            "current selected model. Nothing writes it, so it is stale and would "
+            "shadow the real artifact. Delete it, or regenerate with: python -m src.ml"
+        )
+
+    def test_artifact_declares_the_configured_seed(self) -> None:
+        """``random_state`` must be set, or the forest is not reproducible."""
+        from tests import requires_artifact
+
+        requires_artifact(config.RANDOM_FOREST_MODEL_PATH, "python -m src.ml")
+
+        import joblib
+
+        estimator = joblib.load(config.RANDOM_FOREST_MODEL_PATH).named_steps["classifier"]
+        assert estimator.random_state == config.RANDOM_FOREST_PARAMS["random_state"]
+        assert estimator.n_estimators == config.RANDOM_FOREST_PARAMS["n_estimators"]
+
+    def test_saved_roc_curve_matches_the_saved_artifact(self) -> None:
+        """The curve in ``roc_curve.json`` must come from the shipped artifact.
+
+        Catches a metrics file left behind by a different training run.
+        """
+        from tests import requires_artifact
+
+        requires_artifact(config.ROC_CURVE_JSON_PATH, "python -m src.ml")
+
+        from sklearn.metrics import roc_auc_score
+
+        split = preprocessing.stratified_train_test_split(
+            preprocessing.load_raw_records(config.RAW_PATIENT_CSV)
+        )
+        curve = next(
+            c
+            for c in json.loads(
+                config.ROC_CURVE_JSON_PATH.read_text(encoding="utf-8")
+            )["curves"]
+            if c["model_key"] == "random_forest"
+        )
+
+        pipeline = ml_predict.load_risk_model(config.RANDOM_FOREST_MODEL_PATH)
+        proba = pipeline.predict_proba(split.test_raw[list(config.FEATURE_COLS)])[:, 1]
+        recomputed = roc_auc_score(split.y_test, proba)
+        assert recomputed == pytest.approx(curve["roc_auc"], abs=1e-6), (
+            f"the saved RF curve reports AUC {curve['roc_auc']} but the saved "
+            f"artifact scores {recomputed:.6f} on the same held-out rows; the "
+            "metrics file is stale relative to the model"
+        )
 
 
 # ---------------------------------------------------------------------------

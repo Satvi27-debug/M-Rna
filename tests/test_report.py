@@ -726,7 +726,9 @@ class TestPlatformState:
         by_id = {s["id"]: s for s in state["stages"]}
 
         file_backed = {
-            "risk-model": config.RISK_MODEL_PATH,
+            # SELECTED_MODEL_PATH is what save_model_artifacts writes. RISK_MODEL_PATH
+            # is a read alias nothing writes, so it cannot be the readiness signal.
+            "risk-model": config.SELECTED_MODEL_PATH,
             "attention": config.ATTENTION_WEIGHTS_PATH,
         }
         for stage_id, path in file_backed.items():
@@ -783,10 +785,10 @@ class TestPlatformState:
         becoming true, or the guard above would be satisfied by a permanently
         disabled stage rather than by honest detection.
         """
-        if not config.RISK_MODEL_PATH.exists():
+        if not components._risk_model_available():
             from tests import requires_artifact
 
-            requires_artifact(config.RISK_MODEL_PATH, "python -m src.ml")
+            requires_artifact(config.SELECTED_MODEL_PATH, "python -m src.ml")
         stages = {s["id"]: s for s in components.platform_state()["stages"]}
         assert stages["risk-model"]["status"] == "ready"
 

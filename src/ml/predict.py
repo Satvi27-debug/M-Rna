@@ -184,6 +184,17 @@ def load_model(model_name: str = "selected", path: Any = None) -> Any:
     else:
         artifact = config.MODEL_PATHS.get(model_name, Path(model_name))
 
+    # A named artifact that exists but was not produced by the current training run
+    # is a hazard: it can silently differ from the model the metrics describe. So
+    # refuse an obviously stale copy rather than loading it.
+    stale = _stale_artifacts()
+    if artifact.name in stale and path is None:
+        raise ModelLoadError(
+            f"{artifact} is stale: it predates the current training run and no "
+            "code path writes it, so it may not match the saved metrics. "
+            "Retrain with: python -m src.ml"
+        )
+
     if not Path(artifact).is_file():
         raise ModelLoadError(
             f"Model artifact not found at {artifact}. "
@@ -197,6 +208,59 @@ def load_model(model_name: str = "selected", path: Any = None) -> Any:
             "The file may be corrupt or was written by an incompatible "
             "library version; re-run python -m src.ml.train."
         ) from exc
+
+
+def _stale_artifacts() -> set[str]:
+    """Artifact filenames present on disk but written by no current code path.
+
+    ``models/risk_model.joblib`` is the FR-1.7 *acceptance-criteria* filename. It
+    is read as a fallback by :func:`load_model` but nothing writes it, so if a copy
+    exists it is necessarily from an older run. Left in place it can be served as
+    though it were the current model - which is how a pre-leak-fix Logistic
+    Regression survived a retrain.
+
+    Returns
+    -------
+    set of str
+        Filenames that exist but are not written by any writer.
+    """
+    unwritten = {"risk_model.joblib"}
+    return {
+        name
+        for name in unwritten
+        if (config.MODELS_DIR / name).is_file()
+        and not _is_current(config.MODELS_DIR / name)
+    }
+
+
+def _is_current(path: Any) -> bool:
+    """Whether ``path`` is byte-identical to a freshly written selected model.
+
+    Used only to decide whether an unwritten artifact happens to coincide with the
+    current one. A byte comparison is the right test here: the pipelines are
+    deterministic given the same data, seed and parameters, so an identical hash
+    means the artifact *is* the current model.
+    """
+    target = Path(path)
+    for candidate in (config.SELECTED_MODEL_PATH, *config.MODEL_PATHS.values()):
+        candidate = Path(candidate)
+        if candidate.is_file() and _same_bytes(target, candidate):
+            return True
+    return False
+
+
+def _same_bytes(left: Any, right: Any) -> bool:
+    """Byte-identity of two files, without reading either fully into memory."""
+    left, right = Path(left), Path(right)
+    if left.stat().st_size != right.stat().st_size:
+        return False
+    with left.open("rb") as a, right.open("rb") as b:
+        while True:
+            block_a, block_b = a.read(1 << 20), b.read(1 << 20)
+            if block_a != block_b:
+                return False
+            if not block_a:
+                return True
 
 
 def load_risk_model(path: Any = None) -> Any:
