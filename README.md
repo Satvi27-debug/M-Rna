@@ -16,7 +16,7 @@ generation over regulatory guidelines, and schema-validated LLM report generatio
 All five modules are **implemented**, not stubbed. Every algorithmic body runs.
 
 ```
-629 passed, 3 skipped
+710 passed, 3 skipped
 ```
 
 The 3 skips require a live LLM API key and are labelled as such. No test needs
@@ -29,6 +29,7 @@ network access, a paid token or credentials.
 | 3 | Regulatory RAG | Done | 12 chunks, 384-dim, top-3 retrieval in 0.013–0.057 s |
 | 4 | LLM + Pydantic report | Done | Schema + deterministic dose validation + retry-once; **no real LLM call has been made** (no key configured) |
 | 5 | End-to-end pipeline | Done | Stages 1–4 verified against real components; stage 5 fails honestly without a key |
+| 6 | Dashboard backend | Done | `POST /api/run` executes the real pipeline; verified live over HTTP with real retrieval and a real prediction |
 
 **What has *not* been exercised:** report generation against a live LLM. Stage 4
 and stage 5 of the pipeline are verified with `invoke_llm` patched. That is stated
@@ -989,7 +990,7 @@ Everything up to and including retrieval is verified against real components.
 ```powershell
 python -m pytest tests/test_pipeline.py -v        # 72 passed
 python -m pytest tests/test_native_conflict.py -v # 21 passed
-python -m pytest                                  # 629 passed, 3 skipped
+python -m pytest                                  # 710 passed, 3 skipped
 ```
 
 The 3 skips need a live API key and are marked as such. No test requires network
@@ -1004,7 +1005,171 @@ re-spelling that path, so the writer and reader name one constant.
 
 ---
 
-## 12. Running the project
+## 12. Module 6 — Dashboard backend integration
+
+Implemented. `POST /api/run` executes the real pipeline. The frontend is
+unchanged in design: same six pages, same design system, same components.
+
+### Starting it
+
+```powershell
+python -m dashboard.app                    # opens http://127.0.0.1:8000
+python -m dashboard.app --no-browser --port 8077
+```
+
+Verified: **HTTP 200** on `/`, `/api/health`, `/api/state`, `/static/*`,
+`/api/reports`, `/api/runs`. Stages ready 4 of 5 (report awaits a real run).
+
+### Endpoint contract — `POST /api/run`
+
+Request — the shape `app.js` already sends, unchanged:
+
+```json
+{"stage": "ml",     "record": {"Patient_ID": "P0001", "Age": 24,
+                              "Biomarker_Level": 4.53,
+                              "Pre_Existing_Conditions": 1,
+                              "Vaccine_Dose_mcg": 83.5,
+                              "Prior_Reaction_History": "Mild"}}
+{"stage": "rag",    "question": "What are the storage requirements?"}
+{"stage": "report"}
+{"stage": "all",    "record": { ... }}
+```
+
+Response, abbreviated from a real run:
+
+```json
+{
+  "run_id": "20261015T141836Z-21d7ddfa",
+  "stage": "ml", "status": "completed",
+  "patient_id": "P0001",
+  "risk_label": "Low",
+  "risk_probability": 0.331985,
+  "selected_model": "Logistic Regression",
+  "stage_statuses": {"preprocessing": "completed", "ml_prediction": "completed"},
+  "stage_details": [{"stage": "...", "seconds": 0.1, "status": "completed"}],
+  "timings": {"preprocessing": 0.134, "ml_prediction": 0.095},
+  "disclaimer": "This is a student engineering project and is not intended to
+                 provide real clinical guidance."
+}
+```
+
+`stage: "all"` additionally returns `retrieved_chunks`, `retrieval_queries`,
+`attention` (shape, row-sum bounds, `softmax_verified`), `report`, `artifacts`,
+and `dose`.
+
+| Code | Meaning |
+|---|---|
+| 200 | A required stage completed. The body carries the real result. |
+| 400 | Malformed request. **No stage ran.** Names the offending field. |
+| 409 | A run is already executing. Refused, not queued. |
+| 413 | Body over 16 KB. |
+| 500 | A required stage failed, or an unexpected fault. Traceback stays in the server log. |
+| 502 | The LLM stage failed for an external reason. |
+| 503 | A required artifact or credential is missing. |
+
+**200 is only ever returned when the pipeline itself reports `completed`.**
+
+Verified against real local components:
+
+| Request | Status | Evidence |
+|---|---|---|
+| `rag` | **200** | 3 real chunks from ChromaDB, 0.018 s, cited to the DOCX |
+| `ml` | **200** | Low, p=0.331985, Logistic Regression |
+| `all` (no key) | **500** | `failed_stage: llm_report`, partial, no report |
+| bad stage | 400 | `invalid_request` |
+| `Age: -1` | 400 | `'Age' must be between 0 and 130; got -1.` |
+| `/api/report/../../.env` | 404 | traversal refused |
+
+### Execution and state
+
+**Synchronous, with a lock.** The server is `ThreadingHTTPServer`, so a run holds
+one worker thread and `/api/state`, `/api/health` and the static routes stay
+responsive. A background queue was rejected as unnecessary infrastructure for one
+user-initiated action.
+
+A `threading.Lock` serialises runs so two cannot write the ChromaDB collection,
+model directory or latency log concurrently. A second request while one is in
+flight gets **409, not a queued duplicate** — a double-click cannot double-write.
+Validation runs *before* the lock, so a malformed request is rejected immediately
+rather than queued behind a run.
+
+Every response carries a `run_id` (`<UTC timestamp>-<uuid8>`), and `GET /api/runs`
+returns recent runs. This matters because report filenames are timestamped rather
+than keyed, so without it a client could not tell which file its run produced.
+The lock is released on failure — a crash does not wedge the endpoint.
+
+### Report artifacts
+
+`GET /api/reports` lists files (names, sizes, mtimes — **no contents**).
+`GET /api/report/<filename>` serves one.
+
+Two independent checks, because either alone is insufficient: the name must be a
+bare filename with no separators, *and* the resolved path must still be inside
+`config.REPORTS_DIR` after symlink resolution. Only `.json` and `.md` are served,
+so a stray `.py` or `.csv` in the directory is not exposed. `resolve_report_artifact`
+is unit-tested against 9 traversal forms plus absolute paths.
+
+### Dose reporting
+
+The response preserves the **submitted** dose and unit unchanged, separately from:
+
+- `review_threshold_mcg: 100.0`, `review_threshold_kind: "secondary_clinician_review"`
+- `engineering_dose_guard_mcg` — the project's own software guard, kept separate
+- `clinical_maximum_established: false` — **always**
+
+No response *key* asserts a clinical maximum; a test asserts this, because a field
+name outlives the prose that qualified it. The one `clinical_maximum_*` key is a
+negative that must be `false`.
+
+Boundary, verified live: **100 mcg → not required** (the source says *above* 100),
+**100.01 → required**, **500 → required**. `review_required` also survives a run
+that died before enforcement (e.g. the credential failure arrives first), so a
+flagged dose is never under-reported.
+
+### Native import order — a regression I introduced and caught
+
+`dashboard/runs.py` originally called `from src.ml import predict` **before**
+`_pipeline_module()`. `src.ml.predict` pulls scikit-learn in transitively, so
+torch's `c10.dll` then failed with `WinError 1114` — the exact crash Module 5
+fixed. It was invisible in an already-running process.
+
+Fixed by importing the pipeline first, and guarded by three tests:
+
+- importing `dashboard.app` must **not** load sklearn
+- the dashboard-then-pipeline sequence must complete in a fresh process
+- `run_ml`'s source must call `_pipeline_module()` before any sklearn-reaching import
+
+No `KMP_DUPLICATE_LIB_OK`. No subprocess isolation.
+
+### Visualizations
+
+Unchanged and still reading saved artifacts — Panel A from `roc_curve.json`, Panel B
+from the attention weights, Panel C from the latency logs. 150 DPI floor
+unchanged. No substitute plot is generated for an empty panel.
+
+### Security
+
+- Only the six declared record fields reach the pipeline; unknown keys, path-like
+  keys and config-like keys are dropped (verified)
+- Numeric ranges, lengths, finiteness and the categorical vocabulary are enforced
+- No client-supplied paths; outputs come from `config.REPORTS_DIR`
+- 500 responses carry a class name only — no traceback, no path, no credential
+- Run history stores no secrets
+- Logs print the patient ID and stage timings, not the full record
+
+### Honest limits
+
+- **No live LLM call has been made.** No API key configured. The `all` stage is
+  verified with `invoke_llm` mocked, and returns 500 honestly without a key.
+- **Attention sequence is the PRD sample**, `ACGUACGUACGGCUA`, labelled
+  `sequence_source: "config_default"`. No patient sequence exists in the dataset.
+- **`outputs/reports/` is empty.** No fabricated report was committed as evidence.
+- `HF_HUB_OFFLINE=1` avoids a transient Hugging Face connection failure seen once
+  during testing.
+
+---
+
+## 13. Running the project
 
 ### Training (Module 1)
 
@@ -1091,7 +1256,7 @@ reproducible.
 
 ---
 
-## 13. Source documents
+## 14. Source documents
 
 | File | Role |
 |---|---|
@@ -1106,7 +1271,7 @@ verified rather than assumed.
 
 ---
 
-## 14. Security
+## 15. Security
 
 * No API key, token or credential appears anywhere in this repository.
 * Secrets are read from environment variables inside the function that needs them.

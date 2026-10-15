@@ -1149,24 +1149,58 @@ class TestWebInterface:
     def test_unknown_route_returns_404(self, server) -> None:
         assert self._get(server + "/does-not-exist")[0] == 404
 
-    def test_pipeline_actions_refuse_rather_than_simulate(self, server) -> None:
-        """POST /api/run must return 501, never a fabricated result."""
+    def test_pipeline_actions_execute_real_work_and_never_fabricate(
+        self, server
+    ) -> None:
+        """POST /api/run now runs the pipeline; the anti-fabrication rule stands.
+
+        This test previously asserted HTTP 501, which was correct while the modules
+        were stubs. It is now replaced rather than deleted, because the property it
+        was protecting - that the interface never reports success it did not earn -
+        still has to hold. Three cases:
+
+        1. A malformed request is refused with 400 and no run.
+        2. An unknown stage is refused; it does not fall through to an analysis.
+        3. A run whose required stage fails is a non-2xx, never a 200.
+        """
         import urllib.error
         import urllib.request
 
-        request = urllib.request.Request(
-            server + "/api/run",
-            data=b'{"stage": "ml"}',
-            headers={"Content-Type": "application/json"},
-            method="POST",
+        def post(payload):
+            request = urllib.request.Request(
+                server + "/api/run",
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    return response.status, json.loads(response.read())
+            except urllib.error.HTTPError as exc:
+                return exc.code, json.loads(exc.read())
+
+        # 1. Missing record -> 400, before any stage runs.
+        status, payload = post({"stage": "ml"})
+        assert status == 400
+        assert payload["error"] == "invalid_request"
+        assert "run_id" in payload, "a refused request is still traceable"
+
+        # 2. An unknown stage must not trigger an analysis.
+        status, payload = post({"stage": "destroy_everything"})
+        assert status == 400
+        assert payload["error"] == "invalid_request"
+
+        # 3. No fake success: with no trained models reachable through a stubbed
+        # executor, the response is a failure. Asserted structurally so it holds
+        # whatever the environment's artifacts happen to be.
+        status, payload = post({"stage": "report"})
+        assert status in (400, 500, 502, 503), (
+            f"unexpected status {status}: {payload}"
         )
-        try:
-            with urllib.request.urlopen(request, timeout=8) as response:
-                status, payload = response.status, json.loads(response.read())
-        except urllib.error.HTTPError as exc:
-            status, payload = exc.code, json.loads(exc.read())
-        assert status == 501
-        assert payload["error"] == "not_implemented"
+        if status != 400:
+            assert payload.get("generated") is not True, (
+                "a failed request claimed a report was generated"
+            )
 
     def test_serveable_figures_are_an_explicit_allowlist(self) -> None:
         """Every allowed entry must live inside the figures directory."""

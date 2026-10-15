@@ -431,9 +431,11 @@
     node.className = "result-value " + variant;
   }
 
-  /* Calls the API, which honestly refuses while the modules are unimplemented.
-     The failure surfaces in the interface as an error state with a Retry action,
-     which is the correct behaviour - not a fabricated prediction. */
+  /* Calls the API, which runs the real pipeline.
+
+     A failure surfaces as an error state with a Retry action. The response's own
+     `status` is what gets rendered - never an assumed success - so a run that
+     failed a required stage reads as failed here too. */
   function postJSON(url, payload) {
     return fetch(url, {
       method: "POST",
@@ -488,16 +490,29 @@
       });
   }
 
+  /* Renders a failed run honestly.
+
+     Shows what actually happened - the failing stage and its reason - instead of
+     the old "module not initialized" copy, which is no longer accurate now that
+     the pipeline runs. A failed stage is never presented as a pending analysis. */
   function showRiskUnavailable(payload) {
-    var message = (payload && payload.message) || state.copy.not_initialized;
-    var detail = (payload && payload.detail) || "";
+    var message = (payload && payload.message) ||
+                  state.copy.error;
+    var failed = payload && payload.failed_stage;
+    var partial = payload && payload.partial;
 
     setRiskRow("risk-classification", "Awaiting analysis", "is-pending");
     setRiskRow("risk-probability", "—", "is-empty");
 
     var explanation = document.getElementById("risk-explanation");
-    explanation.textContent = message + (detail ? " " + detail : "");
-    showFormError("form-error", state.copy.error + " The analysis module has not been initialized.");
+    explanation.textContent = failed
+      ? "The run stopped at stage '" + failed + "'. " + message
+      : message;
+
+    /* A partial run is not a success. Say so explicitly rather than leaving the
+       earlier stages' results on screen as though they were the answer. */
+    showFormError("form-error",
+      (partial ? "Partial run: " : "") + "Analysis did not complete. " + message);
   }
 
   function applyRiskResult(data) {
@@ -528,18 +543,59 @@
     postJSON("/api/run", { stage: "rag", question: input.value.trim() })
       .then(function (result) {
         setButtonLoading(button, false);
-        renderChunks(state.metrics.retrieval_top_k,
-          result.ok ? state.copy.empty_states.retrieval
-                    : (result.data && result.data.message) || state.copy.not_initialized);
         if (!result.ok) {
-          showFormError("reg-error", state.copy.error + " The retrieval module has not been initialized.");
+          renderChunks(state.metrics.retrieval_top_k,
+            (result.data && result.data.message) || state.copy.error);
+          showFormError("reg-error", state.copy.error + " " +
+            ((result.data && result.data.message) || ""));
+          return;
         }
+        /* Real retrieved chunks, rendered with their source metadata. Nothing
+           here is synthesised: these came from the ChromaDB index over the
+           supplied guideline document. */
+        renderRetrievedChunks(result.data.chunks || []);
+        showFormError("reg-error", null);
       })
       .catch(function () {
         setButtonLoading(button, false);
         renderChunks(state.metrics.retrieval_top_k, state.copy.error);
         showFormError("reg-error", state.copy.error);
       });
+  }
+
+  /* Renders actual retrieval results.
+
+     Reuses the existing .chunk / .chunk-head / .chunk-index / .chunk-text /
+     .chunk-score / .chunk-source classes, so this is the same visual language the
+     empty states already use - no new styles and no layout change. The badge
+     reports relevance from the score the retriever computed. */
+  function renderRetrievedChunks(chunks) {
+    var list = document.getElementById("chunk-list");
+    if (!list) { return; }
+    clear(list);
+
+    if (!chunks.length) {
+      renderChunks(state.metrics.retrieval_top_k, state.copy.empty_states.retrieval);
+      return;
+    }
+
+    chunks.forEach(function (chunk, position) {
+      var card = el("article", "chunk");
+
+      var head = el("div", "chunk-head");
+      head.appendChild(el("span", "chunk-index", position + 1));
+      head.appendChild(el("span",
+        chunk.is_relevant ? "badge badge-success" : "badge badge-neutral",
+        chunk.is_relevant ? "Relevant" : "Weak Match"));
+      card.appendChild(head);
+
+      card.appendChild(el("p", "chunk-text", chunk.text));
+      card.appendChild(el("p", "chunk-score",
+        "Similarity " + Number(chunk.score).toFixed(4)));
+      card.appendChild(el("p", "chunk-source",
+        chunk.citation || chunk.source || ""));
+      list.appendChild(card);
+    });
   }
 
   function handleGenerateReport() {
@@ -550,13 +606,22 @@
     postJSON("/api/run", { stage: "report" })
       .then(function (result) {
         setButtonLoading(button, false);
-        document.getElementById("meta-status").textContent =
-          state.copy.empty_states.report;
-        if (!result.ok) {
-          showFormError("export-hint",
-            state.copy.error + " The report module has not been initialized.");
-          document.getElementById("export-hint").classList.add("is-error");
+        var hint = document.getElementById("export-hint");
+
+        /* Reflect the response's own status. A failed run must never leave the
+           panel reading "report generated". */
+        if (!result.ok || !result.data.generated) {
+          document.getElementById("meta-status").textContent =
+            (result.data && result.data.message) || state.copy.error;
+          hint.textContent = (result.data && result.data.message) || state.copy.error;
+          hint.classList.add("is-error");
+          return;
         }
+
+        document.getElementById("meta-status").textContent =
+          "Report generated for " + (result.data.patient_id || "patient") + ".";
+        hint.textContent = "Download: /api/report/" + result.data.json;
+        hint.classList.remove("is-error");
       })
       .catch(function () {
         setButtonLoading(button, false);

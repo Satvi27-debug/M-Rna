@@ -47,7 +47,7 @@ from pathlib import Path
 from typing import Any
 
 from src import config
-from dashboard import components, styles
+from dashboard import components, runs, styles
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -95,6 +95,11 @@ CONTENT_TYPES: dict[str, str] = {
     ".png": "image/png",
     ".svg": "image/svg+xml",
 }
+
+#: Largest request body accepted on ``/api/run``. A patient record is six fields;
+#: anything approaching this limit is not a legitimate request and is refused
+#: before being parsed.
+MAX_REQUEST_BYTES = 16 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -358,6 +363,35 @@ class VIPRequestHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"status": "ok"})
             return
 
+        if route == "/api/runs":
+            self._send_json(200, {"runs": runs.recent_runs()})
+            return
+
+        if route == "/api/reports":
+            self._send_json(200, {"reports": runs.list_reports()})
+            return
+
+        if route.startswith("/api/report/"):
+            # Only a bare filename inside outputs/reports/ is served. Resolution
+            # and containment are both checked in runs.resolve_report_artifact;
+            # anything else is refused rather than attempted.
+            name = route[len("/api/report/") :]
+            target = runs.resolve_report_artifact(name)
+            if target is None:
+                self._send_json(
+                    404,
+                    {
+                        "error": "not_found",
+                        "message": (
+                            "No report artifact with that name exists in "
+                            f"{config.REPORTS_DIR.name}/."
+                        ),
+                    },
+                )
+                return
+            self._send_file(target)
+            return
+
         if route.startswith("/static/"):
             target = self._safe_join(STATIC_DIR, route[len("/static/") :])
             if target is None:
@@ -378,34 +412,73 @@ class VIPRequestHandler(BaseHTTPRequestHandler):
         self.do_GET()
 
     def do_POST(self) -> None:  # noqa: N802
-        """Report that pipeline actions are not implemented.
+        """Execute a real pipeline run.
 
-        The interface calls this so its loading, empty and error states are real.
-        Refusing honestly is the correct behaviour: the modules behind it are
-        specified but not implemented, and simulating them would mean fabricating
-        patient predictions, which this project must never do.
+        Delegates entirely to :mod:`dashboard.runs`, which owns validation,
+        execution and error translation. This method reads the body, calls
+        ``execute`` and sends the resulting status code verbatim - it holds no
+        pipeline logic, so there is nowhere for a fabricated result to enter.
+
+        Status codes
+        ------------
+        ``200``  a required stage completed and the body carries the real result.
+        ``400``  the request was malformed; no stage ran.
+        ``409``  a run is already executing.
+        ``502``  the LLM stage failed for an external reason.
+        ``503``  a required artifact or credential is missing.
+        ``500``  an unexpected fault; the traceback stays in the server log.
+
+        Never ``200`` with a failed required stage - that is the single response
+        that would make the interface lie.
         """
-        length = int(self.headers.get("Content-Length") or 0)
-        if length:
-            self.rfile.read(length)
-        route = self.path.split("?", 1)[0].rstrip("/") or "/"
-        if route.startswith("/api/"):
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self._send_json(400, {"error": "invalid_request",
+                                   "message": "Malformed Content-Length."})
+            return
+
+        if length > MAX_REQUEST_BYTES:
             self._send_json(
-                501,
+                413,
                 {
-                    "error": "not_implemented",
-                    "message": components.NOT_INITIALIZED_STATE,
-                    "detail": (
-                        "This interface is the design layer. The "
-                        "preprocessing, machine-learning, attention, retrieval "
-                        "and report-generation modules are specified but not yet "
-                        "implemented."
+                    "error": "request_too_large",
+                    "message": (
+                        f"Request body must be at most {MAX_REQUEST_BYTES} bytes."
                     ),
-                    "command": components.RUN_COMMAND,
                 },
             )
             return
-        self._send(404, b"Not found", "text/plain; charset=utf-8")
+
+        raw = self.rfile.read(length) if length else b""
+
+        # Matched exactly. An unknown /api/ path is a 404, not a run: only
+        # POST /api/run executes the pipeline, so a typo in a client cannot
+        # silently trigger an analysis.
+        route = self.path.split("?", 1)[0].rstrip("/") or "/"
+        if route != "/api/run":
+            self._send(404, b"Not found", "text/plain; charset=utf-8")
+            return
+
+        if not raw.strip():
+            self._send_json(400, {"error": "invalid_request",
+                                   "message": "An empty request body is not valid JSON."})
+            return
+
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            self._send_json(
+                400,
+                {
+                    "error": "invalid_json",
+                    "message": f"The request body is not valid JSON: {exc}",
+                },
+            )
+            return
+
+        status_code, body = runs.execute(payload)
+        self._send_json(status_code, body)
 
     def log_message(self, format: str, *args: Any) -> None:
         """Route request logs to stderr at a single line each."""
