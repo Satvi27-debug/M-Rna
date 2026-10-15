@@ -340,10 +340,81 @@ REQUIRED_DISCLAIMER: str = (
     "clinical guidance."
 )
 
-#: Upper bound on a generated dose, in micrograms. The guideline document treats
-#: doses above 100 mcg as high-reactogenicity, so an LLM output above this value
-#: is rejected by FR-4.4 regardless of what the model claims it read.
-GUIDELINE_HARD_DOSE_CEILING_MCG: float = 100.0
+#: **Secondary clinician review threshold**, in micrograms, read from the guideline.
+#:
+#: The source (Section 2.1) states: *"Doses above 100 micrograms are considered
+#: high-reactogenicity doses and require secondary clinician review before
+#: administration."* That establishes a **review trigger**. It does **not** state a
+#: clinically validated maximum safe dose, and nothing in the supplied document
+#: does. So this value is named and used as what it is.
+#:
+#: Reporting it as "the maximum safe dose" would misrepresent the source. The
+#: distinction is carried in :mod:`src.llm.schemas` as
+#: :attr:`~src.llm.schemas.DoseBound.clinical_maximum_established`, which is
+#: ``False`` for a threshold read from this statement.
+GUIDELINE_REVIEW_THRESHOLD_MCG: float = 100.0
+
+#: Backwards-compatible alias for :data:`GUIDELINE_REVIEW_THRESHOLD_MCG`.
+#:
+#: Retained because the name is referenced by existing tests and by
+#: :meth:`src.llm.schemas.DoseBound.hard_ceiling`. Same value, same meaning - the
+#: rename above is documentation, not a behavioural change.
+GUIDELINE_HARD_DOSE_CEILING_MCG: float = GUIDELINE_REVIEW_THRESHOLD_MCG
+
+#: Explicit engineering restriction on doses accepted by this project, in
+#: micrograms. Kept deliberately separate from
+#: :data:`GUIDELINE_REVIEW_THRESHOLD_MCG` so the two are never conflated.
+#:
+#: This is a **software guard rail**, not a clinical finding: it is what the
+#: project will accept as a recommendation regardless of the guideline. It happens
+#: to be set to the same number because that is the only figure the source states,
+#: but it is a different kind of statement and must be labelled as one. ``None``
+#: would mean "no engineering restriction beyond the source"; it is set so the
+#: distinction is explicit and testable rather than implicit.
+ENGINEERING_DOSE_GUARD_MCG: float | None = GUIDELINE_REVIEW_THRESHOLD_MCG
+
+
+# ---------------------------------------------------------------------------
+# Pipeline execution (architecture rule 8)
+# ---------------------------------------------------------------------------
+
+#: Stage lifecycle statuses. A stage that did not succeed is never reported as
+#: completed, and a stage whose inputs are missing is ``blocked`` rather than
+#: ``failed`` - the two mean different things and are diagnosed differently.
+STAGE_NOT_STARTED: str = "not_started"
+STAGE_RUNNING: str = "running"
+STAGE_COMPLETED: str = "completed"
+STAGE_FAILED: str = "failed"
+STAGE_BLOCKED: str = "blocked"
+STAGE_SKIPPED: str = "skipped"
+
+#: Every recognised status, for validation and for tests.
+STAGE_STATUSES: tuple[str, ...] = (
+    STAGE_NOT_STARTED,
+    STAGE_RUNNING,
+    STAGE_COMPLETED,
+    STAGE_FAILED,
+    STAGE_BLOCKED,
+    STAGE_SKIPPED,
+)
+
+#: Overall run statuses, mirroring :data:`STAGE_STATUSES` plus ``partial``.
+#:
+#: ``partial`` is reported when some stages completed and a later one failed. The
+#: completed stages' outputs are kept and clearly marked, which is more useful
+#: than discarding a real prediction because the LLM credential was missing - but
+#: it must never be mistaken for success.
+RUN_COMPLETED: str = "completed"
+RUN_PARTIAL: str = "partial"
+RUN_FAILED: str = "failed"
+RUN_STATUSES: tuple[str, ...] = (RUN_COMPLETED, RUN_PARTIAL, RUN_FAILED)
+
+#: Sequence used by the attention stage when the patient record carries none.
+#: The PRD asks for a **sample** mRNA sequence of 15-30 bases; the supplied
+#: dataset has no sequence column. Referencing the declared demo sequence rather
+#: than generating one keeps the run reproducible, and it is recorded in the
+#: result so the report never implies the sequence came from the patient.
+PIPELINE_DEFAULT_SEQUENCE: str = ATTENTION_DEMO_SEQUENCE
 
 
 # ---------------------------------------------------------------------------

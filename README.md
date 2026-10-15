@@ -13,23 +13,31 @@ generation over regulatory guidelines, and schema-validated LLM report generatio
 
 ## 1. Status
 
-**This repository currently contains the project architecture only.** The directory
-structure, module contracts, configuration and test specifications are complete and
-internally consistent. The algorithmic bodies are deliberately stubbed with
-`NotImplementedError` so that no result — no fake ML score, fake retrieval hit, fake
-report or fake patient prediction — can be mistaken for real output.
-
-The test suite reflects this honestly:
+All five modules are **implemented**, not stubbed. Every algorithmic body runs.
 
 ```
-47 passed, 139 skipped
+629 passed, 3 skipped
 ```
 
-Passing tests are contract assertions that are true of the architecture today
-(configured column names, the Pydantic schema, chunk-sizing arithmetic, path
-provenance). Skipped tests are labelled with *why* they are pending — either
-`Not implemented yet: <function>` or `Missing optional dependency: <package>` — so a
-test run doubles as an implementation to-do list.
+The 3 skips require a live LLM API key and are labelled as such. No test needs
+network access, a paid token or credentials.
+
+| # | Module | Status | Evidence |
+|---|---|---|---|
+| 1 | Data & machine learning | Done | Logistic Regression F1 **0.7021**, ROC-AUC **0.7679** on a 100-row held-out test set; byte-identical across runs |
+| 2 | mRNA self-attention | Done | 15×15 matrix, rows sum to 1 within 1.2e-7; PyTorch/NumPy parity ≤1e-5 |
+| 3 | Regulatory RAG | Done | 12 chunks, 384-dim, top-3 retrieval in 0.013–0.057 s |
+| 4 | LLM + Pydantic report | Done | Schema + deterministic dose validation + retry-once; **no real LLM call has been made** (no key configured) |
+| 5 | End-to-end pipeline | Done | Stages 1–4 verified against real components; stage 5 fails honestly without a key |
+
+**What has *not* been exercised:** report generation against a live LLM. Stage 4
+and stage 5 of the pipeline are verified with `invoke_llm` patched. That is stated
+wherever it matters rather than glossed, because a mocked response is not evidence
+that a real call works.
+
+**No fabricated results.** Every number above was measured. Where a result could
+not be produced — no API key, an uninformative guideline chunk, a missing artifact —
+the system reports the limitation instead of substituting a plausible value.
 
 ---
 
@@ -810,7 +818,193 @@ No API key, network, or paid token is needed: every unit test patches
 
 ---
 
-## 11. Running the project
+---
+
+## 11. Module 5 — End-to-end pipeline integration
+
+Implemented. Orchestration only: each stage delegates to the module that already
+implements it, and this layer decides order, data contracts, timing and failure
+handling.
+
+### How to run it
+
+```powershell
+# Module 1 only - trains and evaluates, writes models/
+python -m src.pipeline --train
+
+# Module 3 only - rebuilds the ChromaDB index
+python -m src.pipeline --index
+
+# One patient end to end, all stages, writes the report pair
+python -m src.pipeline --run --patient-id P0001
+
+# Everything, plus the three-panel figure
+python -m src.pipeline --all
+
+# Programmatic
+python -c "from src.pipeline import run_pipeline, load_patient; run_pipeline(load_patient('P0001'))"
+```
+
+### Required environment variables
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `LLM_API_KEY` | **Only for the report stage** | Report generation. `OPENAI_API_KEY` is accepted as a fallback. |
+| `LLM_MODEL` | No | Defaults to `gpt-4o-mini` in `src/config.py`. |
+| `LLM_BASE_URL` | No | Any OpenAI-compatible endpoint. |
+
+Stages 1–4 and the dashboard run entirely locally with **no** API key. The key is
+read at call time via `python-dotenv`; `.env` is gitignored and never committed.
+
+### Stage order and statuses
+
+```
+preprocessing -> ml_prediction -> attention -> rag_retrieval -> llm_report -> persist
+```
+
+Each stage reports one of `not_started`, `running`, `completed`, `failed`,
+`blocked`. The rules that matter:
+
+- A failed stage is **never** reported completed.
+- A stage after a failure does not run, and records `not_started`.
+- A run with any **required** failure cannot be `completed`.
+- Optional stages (`train`, `build_dashboard`) may fail without invalidating a run.
+- A `blocked` stage means its inputs were missing — different cause, different fix.
+- Completed stages' outputs survive a later failure, on `PipelineError.result`,
+  with `status='failed'` and `partial=True`. A real prediction is more useful than
+  none, provided it cannot be read as a success.
+
+### Attention input: no patient sequence exists
+
+The supplied dataset has **no sequence column**. The PRD asks for a *sample*
+mRNA sequence of 15–30 bases, so the pipeline uses
+`config.PIPELINE_DEFAULT_SEQUENCE` (`ACGUACGUACGGCUA`) and records
+`sequence_source='config_default'`. **No patient sequence is invented.** Pass
+`--sequence` to override, or include an `mRNA_Sequence` key in the record.
+
+Attention is a **required** stage: the PRD's Week 4 definition of done needs the
+heatmap as Panel B.
+
+### Native-library diagnostic — the important one
+
+**Symptom.** Loading scikit-learn before torch or ChromaDB in one interpreter
+breaks both, on Windows 11 / Python 3.13.5:
+
+| import order | outcome |
+|---|---|
+| `sklearn → torch` | `OSError [WinError 1114]` loading `c10.dll` |
+| `sklearn → chroma` | **native crash, exit `0xC0000005`** (uncatchable) |
+| `torch → chroma → sklearn` | **OK** |
+| `chroma → torch → sklearn` | **OK** |
+
+**Method.** `src/pipeline/native_stack.py` runs each case in a **fresh
+subprocess** and reads the exit code — a native fault cannot be caught as a Python
+exception, so in-process testing cannot observe one.
+
+```powershell
+python -m src.pipeline.native_stack     # prints the matrix
+```
+
+**Diagnosis: import order, not incompatibility.** scikit-learn pulls in an
+OpenMP/MKL runtime; once resident, torch's `c10.dll` fails to initialise and
+ChromaDB's Rust HNSW extension faults. Loading scikit-learn *last* makes all three
+coexist — verified 5/5 identical runs of the real pipeline sequence.
+
+`KMP_DUPLICATE_LIB_OK=TRUE` does **not** help. Verified, and nothing depends on it.
+
+**Fix.** `preload_native_libraries()` imports torch and ChromaDB before
+scikit-learn, called at the top of `pipeline.py` ahead of every sklearn-reaching
+import. Process isolation was the first candidate and is **unnecessary** here — a
+single process runs all four modules correctly. `tests/test_native_conflict.py`
+(21 tests) spawns fresh processes and fails if the ordering regresses.
+
+### Dose-review semantics — corrected
+
+The guideline states *"Doses above 100 micrograms … require secondary clinician
+review."* That establishes a **review threshold**. It does **not** state a
+clinically validated maximum safe dose, and nothing in the supplied document does.
+
+So:
+
+- `config.GUIDELINE_REVIEW_THRESHOLD_MCG = 100.0` — source-derived review trigger.
+- `config.ENGINEERING_DOSE_GUARD_MCG` — this project's own software guard, kept
+  separate so the two are never conflated. Same number, different kind of claim.
+- `DoseBound.clinical_maximum_established` is **always `False`**.
+- `SafetyOutcome.clinical_maximum_established` is **always `False`**.
+- `result.as_dict()["clinical_maximum_established"]` is **always `False`**.
+
+The **submitted** dose is validated **independently of the LLM** —
+`enforce_safety_constraints(..., submitted_dose_mcg=...)` never consults the
+model's output. An LLM returning `Eligible_For_Vaccine=True` for a 500 mcg dose
+cannot bypass it.
+
+`DoseReviewFinding` preserves the dose **as submitted**, with its unit. Clamping a
+recommendation never rewrites the original input.
+
+Boundary behaviour, tested:
+
+| submitted | review required | eligibility |
+|---|---|---|
+| 100 mcg | no — the source says *above* 100 | unchanged |
+| 100.01 mcg | yes | forced `False` |
+| 500 mcg | yes | forced `False`, original preserved at 500 |
+
+### Honest failure: no key configured
+
+With no API key the pipeline runs stages 1–4 for real, then fails stage 5:
+
+```
+[fail] Pipeline stage 'llm_report' failed: No LLM credential is configured...
+==========================================================================
+PIPELINE RUN  -  P0001  -  status: FAILED
+  (PARTIAL: some stages completed; this is NOT a successful run)
+==========================================================================
+  [ok     ] preprocessing      0.261s
+  [ok     ] ml_prediction      0.141s
+  [ok     ] attention          0.011s
+  [ok     ] rag_retrieval     16.523s
+  [FAIL   ] llm_report         0.000s  No LLM credential is configured...
+  [--     ] persist            0.000s  not reached
+```
+
+Exit code 1, **no report artifact written**, dashboard stage 05 stays
+`not-initialized`. A mocked LLM response is never treated as proof a real call
+succeeded.
+
+### What is real vs. mocked
+
+| Check | Real | Mocked |
+|---|---|---|
+| Preprocessing, split, metrics | ✅ real CSV, real models | — |
+| Risk prediction | ✅ real `risk_model.joblib` | — |
+| Attention | ✅ real PyTorch forward pass | — |
+| Retrieval | ✅ real ChromaDB index, real DOCX | — |
+| LLM report | — | ✅ `invoke_llm` patched |
+
+**No end-to-end run has made a real LLM call**, because no API key is configured.
+Everything up to and including retrieval is verified against real components.
+
+### Tests
+
+```powershell
+python -m pytest tests/test_pipeline.py -v        # 72 passed
+python -m pytest tests/test_native_conflict.py -v # 21 passed
+python -m pytest                                  # 629 passed, 3 skipped
+```
+
+The 3 skips need a live API key and are marked as such. No test requires network
+access, a paid token, or credentials.
+
+### Dashboard
+
+Unchanged. `POST /api/run` still returns **501** — the interface is not wired to
+the pipeline in this stage. The only dashboard edit is
+`components.py` now reading `config.GENERATION_LOG_JSON_PATH` instead of
+re-spelling that path, so the writer and reader name one constant.
+
+---
+
+## 12. Running the project
 
 ### Training (Module 1)
 
@@ -897,7 +1091,7 @@ reproducible.
 
 ---
 
-## 12. Source documents
+## 13. Source documents
 
 | File | Role |
 |---|---|
@@ -912,7 +1106,7 @@ verified rather than assumed.
 
 ---
 
-## 13. Security
+## 14. Security
 
 * No API key, token or credential appears anywhere in this repository.
 * Secrets are read from environment variables inside the function that needs them.

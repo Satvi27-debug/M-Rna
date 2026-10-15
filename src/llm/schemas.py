@@ -91,17 +91,70 @@ REQUIRED_REPORT_FIELDS: tuple[str, ...] = (
 
 
 @dataclass(frozen=True)
+class DoseReviewFinding:
+    """The documented secondary-review requirement for a submitted dose.
+
+    Created when a dose exceeds the threshold the guideline actually states.
+    This is the record that satisfies "preserve the original submitted dose" -
+    the submitted value is stored here untouched, so clamping a recommendation
+    downstream never destroys what the caller originally asked.
+
+    Attributes
+    ----------
+    submitted_dose_mcg:
+        The dose as submitted, in the unit it was given. Never overwritten by a
+        clamped or corrected value.
+    unit:
+        Unit of ``submitted_dose_mcg``, preserved verbatim from the input record.
+    threshold_mcg:
+        The threshold that was crossed.
+    review_required:
+        Whether the source attaches a consequence to crossing it. ``True`` for the
+        "requires secondary clinician review" statement.
+    threshold_kind:
+        What the figure actually is - ``'secondary_clinician_review'``. Never
+        ``'maximum_safe_dose'``, because the supplied document does not state one.
+    citation:
+        The verbatim guideline sentence the threshold came from, or ``""`` when
+        the threshold was defaulted rather than read from the retrieved text.
+    """
+
+    submitted_dose_mcg: float
+    unit: str
+    threshold_mcg: float
+    review_required: bool
+    threshold_kind: str = "secondary_clinician_review"
+    citation: str = ""
+
+    @property
+    def exceeds_threshold(self) -> bool:
+        return self.submitted_dose_mcg > self.threshold_mcg
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "submitted_dose_mcg": self.submitted_dose_mcg,
+            "submitted_dose_preserved": True,
+            "unit": self.unit,
+            "threshold_mcg": self.threshold_mcg,
+            "review_required": self.review_required,
+            "threshold_kind": self.threshold_kind,
+            "clinical_maximum_established": False,
+            "citation": self.citation,
+        }
+
+
+@dataclass(frozen=True)
 class DoseBound:
-    """A dose ceiling read out of the retrieved guideline chunks (FR-4.4).
+    """A dose threshold read out of the retrieved guideline chunks (FR-4.4).
 
     Attributes
     ----------
     max_mcg:
-        Maximum dose permitted for this patient profile. FR-4.4 fires when a
-        recommended dose exceeds it.
+        The threshold that was found. FR-4.4 fires when a dose exceeds it.
     source_text:
-        The guideline sentence the bound was derived from, so the rejection can
-        cite its own evidence.
+        The guideline sentence the bound was derived from, so the finding can cite
+        its own evidence. Empty when the bound was **defaulted** rather than read
+        from the retrieved text, which is how a caller tells the two apart.
     unit:
         ``'mcg'`` or ``'mg'``. The guideline document is in micrograms;
         :attr:`max_mg` converts so the report's ``Recommended_Dose_mg`` field can
@@ -114,24 +167,65 @@ class DoseBound:
 
     @property
     def max_mg(self) -> float:
-        """The same ceiling expressed in milligrams for ``Recommended_Dose_mg``."""
+        """The same threshold expressed in milligrams for ``Recommended_Dose_mg``."""
         return self.max_mcg / 1000.0
+
+    @property
+    def derived_from_guideline(self) -> bool:
+        """Whether this threshold was read from the retrieved text."""
+        return bool(self.source_text)
+
+    @property
+    def clinical_maximum_established(self) -> bool:
+        """Always ``False``.
+
+        The supplied guideline establishes a *secondary clinician review*
+        threshold, not a clinically validated maximum safe dose. No such maximum
+        is stated anywhere in the source, so this property exists to make that
+        absence impossible to overlook when the value is rendered or asserted on.
+        """
+        return False
+
+    @property
+    def threshold_kind(self) -> str:
+        """What this figure is, in words safe to show a reader."""
+        return "secondary_clinician_review" if self.derived_from_guideline else "defaulted_threshold"
 
     def exceeds(self, dose_mcg: float) -> bool:
         """True when ``dose_mcg`` is above the bound (FR-4.4)."""
         return float(dose_mcg) > self.max_mcg
 
+    def review_for(self, dose_mcg: float, unit: str = "mcg") -> DoseReviewFinding:
+        """Build the review finding for a submitted dose.
+
+        Records the dose **as submitted**. The caller may separately clamp a
+        recommendation; that must not rewrite this value.
+        """
+        return DoseReviewFinding(
+            submitted_dose_mcg=float(dose_mcg),
+            unit=unit,
+            threshold_mcg=self.max_mcg,
+            review_required=self.exceeds(float(dose_mcg)),
+            threshold_kind=self.threshold_kind,
+            citation=self.source_text,
+        )
+
     @classmethod
     def hard_ceiling(cls) -> "DoseBound":
-        """Bound derived from ``config.GUIDELINE_HARD_DOSE_CEILING_MCG``.
+        """Bound derived from ``config.GUIDELINE_REVIEW_THRESHOLD_MCG``.
 
         The guideline document states that doses above 100 mcg are
         high-reactogenicity and require secondary clinician review, so 100 mcg is
-        the unconditional ceiling. This is the fallback when no patient-specific
-        bound was extracted, so the check always has something to enforce.
+        the unconditional review threshold. This is the fallback when no bound was
+        extracted from the retrieved chunks, so the check always has something to
+        enforce.
+
+        Named ``hard_ceiling`` for continuity with existing callers. Read it as
+        "the project's enforced review threshold", not as a clinical maximum -
+        see :attr:`clinical_maximum_established`.
         """
         return cls(
-            max_mcg=config.GUIDELINE_HARD_DOSE_CEILING_MCG,
+            max_mcg=config.GUIDELINE_REVIEW_THRESHOLD_MCG,
             source_text=(
                 "Doses above 100 micrograms are considered high-reactogenicity "
                 "doses and require secondary clinician review before administration."
@@ -163,15 +257,30 @@ class SafetyOutcome:
     report: ClinicalSafetyReport
     violations: list[SafetyViolation] = field(default_factory=list)
     overridden: bool = False
+    #: Set when a submitted or recommended dose crossed the guideline's review
+    #: threshold. Carries the dose **as submitted**, so a clamped recommendation
+    #: can never be mistaken for the original input.
+    dose_review: DoseReviewFinding | None = None
 
     @property
     def is_compliant(self) -> bool:
         return not self.violations
 
+    @property
+    def clinical_maximum_established(self) -> bool:
+        """Whether a clinical maximum safe dose was established. Always ``False``.
+
+        Exposed on the outcome so no consumer - report, dashboard or pipeline - can
+        read an enforced threshold and conclude the source set a clinical maximum.
+        """
+        return False
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "compliant": self.is_compliant,
             "overridden": self.overridden,
+            "clinical_maximum_established": self.clinical_maximum_established,
+            "dose_review": self.dose_review.as_dict() if self.dose_review else None,
             "violations": [v.as_dict() for v in self.violations],
             "report": self.report.model_dump(),
         }
@@ -214,24 +323,32 @@ def validate_report(payload: dict[str, Any]) -> ClinicalSafetyReport:
 
 
 def enforce_safety_constraints(
-    report: ClinicalSafetyReport, bound: DoseBound | None = None
+    report: ClinicalSafetyReport,
+    bound: DoseBound | None = None,
+    submitted_dose_mcg: float | None = None,
+    submitted_unit: str = "mcg",
 ) -> SafetyOutcome:
     """Apply the deterministic safety rules to a schema-valid report.
 
     Enforced here, in code, so FR-4.4 and FR-4.5 hold regardless of what the
     model produced:
 
-    1. **Dose bound (FR-4.4).** If ``Recommended_Dose_mg`` exceeds
+    1. **Dose threshold (FR-4.4).** If ``Recommended_Dose_mg`` exceeds
        ``bound.max_mg``, the report is overridden: eligibility is forced to
-       ``False``, the offending dose is clamped to the bound, and a violation
+       ``False``, the offending dose is clamped to the threshold, and a violation
        naming the guideline source is recorded.
-    2. **Disclaimer (FR-4.5).** ``Disclaimer`` is unconditionally replaced with
+    2. **Submitted dose (FR-4.4).** When ``submitted_dose_mcg`` is supplied, it is
+       checked **independently of anything the model said**. This is what stops an
+       LLM returning ``Eligible_For_Vaccine=True`` for a dose the guideline flags
+       for review: the model is never asked about the submitted dose at all, and
+       the finding survives whatever it produced.
+    3. **Disclaimer (FR-4.5).** ``Disclaimer`` is unconditionally replaced with
        ``config.REQUIRED_DISCLAIMER`` if it is empty or does not carry the
        required notice.
-    3. **Citations (FR-4.2).** ``FDA_Safety_Warnings_Cited`` must be non-empty;
+    4. **Citations (FR-4.2).** ``FDA_Safety_Warnings_Cited`` must be non-empty;
        an empty list means the recommendation is ungrounded and is recorded as a
        violation.
-    4. **Negative dose (FR-4.1).** A negative recommended dose is a sign of
+    5. **Negative dose (FR-4.1).** A negative recommended dose is a sign of
        malformed generation and is recorded.
 
     Parameters
@@ -239,12 +356,22 @@ def enforce_safety_constraints(
     report:
         A report that has already passed :func:`validate_report`.
     bound:
-        Patient-specific dose ceiling. Defaults to :meth:`DoseBound.hard_ceiling`.
+        Threshold to enforce. Defaults to :meth:`DoseBound.hard_ceiling`.
+    submitted_dose_mcg:
+        The dose the caller actually supplied, in ``submitted_unit``. Checked
+        against ``bound`` on its own terms. ``None`` skips the check - which is
+        correct for a report generated without a patient record behind it, and is
+        the only way a submitted dose goes unexamined.
+    submitted_unit:
+        Unit of ``submitted_dose_mcg``, preserved in the finding.
 
     Returns
     -------
     SafetyOutcome
-        The possibly-corrected report plus every violation found.
+        The possibly-corrected report, every violation found, and a
+        :class:`DoseReviewFinding` when a dose crossed the threshold. The finding
+        always carries the dose **as submitted**; clamping affects only the
+        report's recommended value.
 
     Notes
     -----
@@ -260,6 +387,32 @@ def enforce_safety_constraints(
 
     violations: list[SafetyViolation] = []
     updates: dict[str, Any] = {}
+
+    # --- Rule 0: the submitted dose, checked without reference to the model ---
+    # Deliberately first and deliberately independent. The model's opinion is not
+    # an input here, so it cannot influence the outcome.
+    dose_review: DoseReviewFinding | None = None
+    if submitted_dose_mcg is not None:
+        dose_review = bound.review_for(submitted_dose_mcg, unit=submitted_unit)
+        if dose_review.review_required:
+            violations.append(
+                SafetyViolation(
+                    rule="submitted_dose_requires_clinician_review",
+                    detail=(
+                        f"Submitted dose {dose_review.submitted_dose_mcg} "
+                        f"{dose_review.unit} is above the "
+                        f"{bound.max_mcg} mcg threshold at which the guideline "
+                        "requires secondary clinician review. The guideline states "
+                        "a review threshold, not a clinically established maximum "
+                        "safe dose; this project's software eligibility is not a "
+                        "clinical approval. Submitted value preserved unchanged."
+                    ),
+                    requirement="FR-4.4",
+                )
+            )
+            # The verdict is set regardless of what the model claimed.
+            if report.Eligible_For_Vaccine:
+                updates["Eligible_For_Vaccine"] = False
 
     # --- Rule 1: dose bound (FR-4.4) -------------------------------------
     dose_mg = float(report.Recommended_Dose_mg)
@@ -283,17 +436,20 @@ def enforce_safety_constraints(
 
     elif bound.exceeds(dose_mg * 1000.0):
         source = bound.source_text or (
-            f"Ceiling of {bound.max_mcg} {bound.unit} from the retrieved guideline."
+            f"Review threshold of {bound.max_mcg} {bound.unit}; no explicit figure "
+            "was found in the retrieved text, so the configured default was used."
         )
         violations.append(
             SafetyViolation(
-                rule="dose_exceeds_guideline_bound",
+                rule="dose_exceeds_review_threshold",
                 detail=(
                     f"Recommended_Dose_mg was {dose_mg} mg "
-                    f"({round(dose_mg * 1000.0, 6)} mcg), above the maximum "
-                    f"{bound.max_mcg} mcg established by the retrieved guideline "
-                    f"text. The dose was clamped to {bound_mg} mg and eligibility "
-                    f"was set to false. Guideline evidence: {source}"
+                    f"({round(dose_mg * 1000.0, 6)} mcg), above the "
+                    f"{bound.max_mcg} mcg threshold. Eligibility was set to false "
+                    "and the recommendation clamped to "
+                    f"{bound_mg} mg. This threshold is a secondary clinician "
+                    "review trigger, not a clinically established maximum safe "
+                    f"dose. Guideline evidence: {source}"
                 ),
                 requirement="FR-4.4",
             )
@@ -334,6 +490,7 @@ def enforce_safety_constraints(
         report=corrected,
         violations=violations,
         overridden=bool(updates),
+        dose_review=dose_review,
     )
 
 

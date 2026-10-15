@@ -502,7 +502,9 @@ def load_latency_panel_data(
         missing series is tolerated and simply omitted from the chart.
     """
     retrieval = _optional_read_json(retrieval_log_path or config.RETRIEVAL_LOG_JSON_PATH)
-    generation = _optional_read_json(generation_log_path or (config.LOGS_DIR / "generation_log.json"))
+    generation = _optional_read_json(
+        generation_log_path or config.GENERATION_LOG_JSON_PATH
+    )
     pipeline = _optional_read_json(latency_log_path or config.LATENCY_LOG_JSON_PATH)
 
     if retrieval is None and generation is None:
@@ -748,7 +750,7 @@ def artifact_availability() -> dict[str, bool]:
         "roc": config.ROC_CURVE_JSON_PATH.exists() and config.METRICS_JSON_PATH.exists(),
         "attention": config.ATTENTION_WEIGHTS_PATH.exists(),
         "latency": config.RETRIEVAL_LOG_JSON_PATH.exists()
-        or (config.LOGS_DIR / "generation_log.json").exists(),
+        or config.GENERATION_LOG_JSON_PATH.exists(),
     }
 
 
