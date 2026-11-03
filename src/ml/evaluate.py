@@ -433,6 +433,9 @@ def save_evaluation_artifacts(
     # Flattened rather than nested so the CLI can print one path per line.
     for name, path in plot_confusion_matrices(evaluations).items():
         written[f"confusion_matrix_figure:{name}"] = path
+    written["classification_report_figure"] = plot_classification_report(
+        evaluations, selection=selection
+    )
     return written
 
 
@@ -584,3 +587,103 @@ def plot_confusion_matrices(
             )
             written[name] = styles.save_figure(fig, directory / filename)
     return written
+
+
+def plot_classification_report(
+    evaluations: dict[str, ModelEvaluation],
+    selection: SelectionResult | None = None,
+    save_dir: Any = None,
+) -> Path:
+    """Render the selected model's classification report as a figure.
+
+    The Week 1 Definition of Done asks for the classification report and the
+    confusion matrix of the final chosen model under ``outputs/figures/``. The
+    machine-readable report already lives in ``outputs/logs/classification_report.json``;
+    this function adds the human-readable figure so the literal deliverable exists.
+
+    Parameters
+    ----------
+    evaluations:
+        Per-model results from :func:`evaluate_all_models`.
+    selection:
+        FR-1.7 outcome. When omitted the highest-F1 model is used, which is the
+        same rule the selection stage applies.
+    save_dir:
+        Destination directory. Defaults to ``config.FIGURES_DIR``.
+
+    Returns
+    -------
+    pathlib.Path
+        The written PNG.
+    """
+    import matplotlib.pyplot as plt
+
+    from dashboard import styles
+
+    if selection is not None:
+        selected_name = selection.best_name
+    else:
+        selected_name = max(evaluations, key=lambda key: evaluations[key].f1)
+
+    evaluation = evaluations[selected_name]
+    report = evaluation.classification_report
+
+    rows: list[list[str]] = []
+    for label, description in (("0", "Low risk"), ("1", "High risk")):
+        metrics = report.get(label)
+        if not metrics:
+            continue
+        rows.append([
+            f"{label} ({description})",
+            f"{metrics['precision']:.4f}",
+            f"{metrics['recall']:.4f}",
+            f"{metrics['f1-score']:.4f}",
+            f"{int(metrics['support'])}",
+        ])
+    for label in ("macro avg", "weighted avg"):
+        metrics = report.get(label)
+        if not metrics:
+            continue
+        rows.append([
+            label,
+            f"{metrics['precision']:.4f}",
+            f"{metrics['recall']:.4f}",
+            f"{metrics['f1-score']:.4f}",
+            f"{int(metrics['support'])}",
+        ])
+
+    columns = ["Class", "Precision", "Recall", "F1-score", "Support"]
+
+    directory = Path(save_dir) if save_dir else config.FIGURES_DIR
+    directory.mkdir(parents=True, exist_ok=True)
+
+    with styles.apply_style():
+        fig, ax = plt.subplots(figsize=(7.2, 3.4))
+        ax.axis("off")
+        table = ax.table(
+            cellText=rows,
+            colLabels=columns,
+            loc="center",
+            cellLoc="center",
+            colLoc="center",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1.0, 1.45)
+        for (row, _column), cell in table.get_celld().items():
+            if row == 0:
+                cell.set_facecolor(styles.PALETTE["navy"])
+                cell.set_text_props(color=styles.PALETTE["text-inverse"], weight="600")
+            elif row % 2 == 0:
+                cell.set_facecolor(styles.PALETTE["surface-alt"])
+        ax.set_title(
+            f"{evaluation.display_name} Classification Report (selected model)\n"
+            f"accuracy {evaluation.accuracy:.4f} · test rows {evaluation.test_rows}",
+            fontsize=11,
+            fontweight="600",
+            pad=14,
+        )
+        fig.tight_layout()
+        return styles.save_figure(
+            fig, directory / config.FIGURE_CLASSIFICATION_REPORT_FILENAME
+        )

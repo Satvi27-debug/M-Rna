@@ -16,7 +16,7 @@ generation over regulatory guidelines, and schema-validated LLM report generatio
 All five modules are **implemented**, not stubbed. Every algorithmic body runs.
 
 ```
-729 passed, 3 skipped
+741 passed, 3 skipped
 ```
 
 The 3 skips require a live LLM API key and are labelled as such. No test needs
@@ -26,9 +26,9 @@ network access, a paid token or credentials.
 |---|---|---|---|
 | 1 | Data & machine learning | Done | Logistic Regression F1 **0.7021**, ROC-AUC **0.7679** on a 100-row held-out test set; byte-identical across runs |
 | 2 | mRNA self-attention | Done | 15×15 matrix, rows sum to 1 within 1.2e-7; PyTorch/NumPy parity ≤1e-5 |
-| 3 | Regulatory RAG | Done | 12 chunks, 384-dim, top-3 retrieval in 0.013–0.057 s |
-| 4 | LLM + Pydantic report | Done | Schema + deterministic dose validation + retry-once; **no real LLM call has been made** (no key configured) |
-| 5 | End-to-end pipeline | Done | Stages 1–4 verified against real components; stage 5 fails honestly without a key |
+| 3 | Regulatory RAG | Done | 12 chunks, 384-dim, top-3 retrieval in 0.013–0.051 s |
+| 4 | LLM + Pydantic report | Implemented; **live run blocked** | Schema + deterministic dose validation + retry-once are tested; **no real LLM call has been made** (no key configured), so `outputs/reports/` is empty |
+| 5 | End-to-end pipeline | Implemented; live report stage blocked | Stages 1–4 verified against real components; stage 5 fails honestly without a key |
 | 6 | Dashboard backend | Done | `POST /api/run` executes the real pipeline; verified live over HTTP with real retrieval and a real prediction |
 
 **What has *not* been exercised:** report generation against a live LLM. Stage 4
@@ -264,8 +264,8 @@ unsatisfied, both paths are honoured and the mapping is explicit:
 | PRD path | Canonical path here | Reconciliation |
 |---|---|---|
 | `data/patient_records.csv` | `data/raw/patient_records.csv` | Architecture rule 1 separates raw from processed |
-| `data/patient_records_clean.csv` | `data/processed/patient_records_clean.csv` | Same |
-| `outputs/risk_model.joblib` (FR-1.7) | `models/risk_model.joblib` | Written to both by `save_model_artifacts` |
+| `data/patient_records_clean.csv` | `data/processed/patient_records_clean.csv` | Written to both by `save_clean_records` |
+| `outputs/risk_model.joblib` (FR-1.7) | `models/selected_model.joblib` | Written to both by `save_model_artifacts`; `RISK_MODEL_PATH` is a read-only fallback alias |
 | `outputs/chroma_store/` (Week 3 DoD) | `vectorstore/` | Written to both by `export_index_compatibility_copy` |
 | `mrna_safety_guidelines.txt` | `guidelines/Moderna_mRNA_Safety_Guidelines.docx` | Supplied as `.docx`; text extracted in memory, source unmodified |
 | `src/dashboard.py` | `dashboard/app.py`, `dashboard/static/` | Architecture rule 9 |
@@ -273,10 +273,12 @@ unsatisfied, both paths are honoured and the mapping is explicit:
 | `src/attention.py` | `src/attention/self_attention.py` | Package layout |
 | `src/rag_index.py` | `src/rag/ingest.py`, `retrieve.py` | Ingestion and retrieval split, per architecture rule 6 |
 
-**One PRD element is not yet scaffolded.** PRD Sections 3.3 and the Week 1 Definition of
-Done call for `notebooks/01_data_eda.ipynb` (at least three EDA visualisations). It is
-intentionally absent from the requested file tree, so no empty notebook directory was
-created. Track it as a Week 1 deliverable.
+**Notebooks are now present.** PRD Sections 3.3 and the Week 1 Definition of Done call
+for `notebooks/01_data_eda.ipynb` (at least three EDA visualisations). It now exists and
+is executed, with three embedded figures: numeric distributions, a correlation heatmap,
+and the target class balance. `notebooks/02_attention_math.ipynb` is the recommended
+companion for Module 2, built from the real attention module output rather than a
+hand-drawn illustration.
 
 ---
 
@@ -299,9 +301,10 @@ pip install -r requirements.txt
 been added for popularity's sake.
 
 > **On pinning.** The PRD checklist asks for pinned versions, while the PRD's own
-> Section 11.1 template uses `>=`. The PRD's template is reproduced verbatim. Before final
-> submission, capture the exact resolved versions so the checklist item is satisfied:
-> `pip freeze > requirements.lock.txt`.
+> Section 11.1 template uses `>=`. `requirements.txt` reproduces the template; the exact
+> resolved versions are committed in **`requirements.lock.txt`**, generated from the
+> environment that produced the reported results. Install the lock file for a
+> byte-reproducible setup: `pip install -r requirements.lock.txt`.
 
 ### Environment variables
 
@@ -427,7 +430,7 @@ Each artifact is a complete `Pipeline([ColumnTransformer, classifier])`, so one
 | Model | Accuracy | Precision | Recall | F1 | ROC-AUC |
 |---|---|---|---|---|---|
 | **Logistic Regression** | **0.7200** | **0.7333** | **0.6735** | **0.7021** | **0.7679** |
-| Random Forest | 0.6300 | 0.6200 | 0.6327 | 0.6263 | 0.7095 |
+| Random Forest | 0.6300 | 0.6200 | 0.6327 | 0.6263 | 0.7065 |
 
 Precision, recall and F1 are for the positive class (`Reaction_Score == 1`);
 accuracy is overall.
@@ -460,9 +463,11 @@ A tuned forest might close the gap, but no tuning was performed, per the brief.
 | `outputs/logs/roc_curve.json` | ROC points the dashboard reads |
 | `outputs/logs/ml_training_metadata.json` | Feature names, seed, imputation statistics |
 | `outputs/figures/ml_roc_curve.png` | ROC comparison @ 150 DPI |
+| `outputs/figures/classification_report.png` | Selected model's report table @ 150 DPI (Week 1 DoD) |
 | `outputs/figures/logistic_regression_confusion_matrix.png` | |
 | `outputs/figures/random_forest_confusion_matrix.png` | |
 | `data/processed/patient_records_clean.csv` | Cleaned dataset, 0 missing cells |
+| `data/patient_records_clean.csv` | PRD-named compatibility copy (Week 1 DoD) |
 
 ### Reproducibility
 
@@ -676,7 +681,21 @@ identical vectors — the failure FR-3.2's count check cannot catch.
 
 ### Measured retrieval behaviour
 
-All 8 evaluation queries return exactly 3 results, 0.035–0.057 s each (mean 0.042 s).
+All 8 evaluation queries return exactly 3 results, **0.0128–0.0510 s each** (mean
+**0.0219 s**). The Week 3 DoD asks for a markdown table of question, top result and
+latency; the measured log is:
+
+| # | Question | Top source | Latency (s) |
+|---:|---|---|---:|
+| 1 | What are the storage requirements below -20C? | Section 1: Storage and Handling Requirements | 0.0510 |
+| 2 | general dosing principles primary series dose range micrograms | Section 2: Dosing Guidance by Age Band | 0.0251 |
+| 3 | precautions requiring secondary clinician review | Section 3: Contraindications and Warnings | 0.0221 |
+| 4 | absolute contraindications known severe allergic reaction to a prior dose | Section 3: Contraindications and Warnings | 0.0210 |
+| 5 | reporting thresholds adverse event documented within 24 hours | Section 4: Adverse Event Documentation | 0.0147 |
+| 6 | standard warnings patients monitored for at least 15 minutes | Section 3: Contraindications and Warnings | 0.0146 |
+| 7 | dose adjustment for elevated biomarker levels | Section 2: Dosing Guidance by Age Band | 0.0139 |
+| 8 | age-banded reference doses | Section 2: Dosing Guidance by Age Band | 0.0128 |
+
 Dose evidence for a 120 mcg candidate retrieves **25.0, 50.0, 100.0** mcg from the
 document, with `exceeds_stated_max = True` — a 100 mcg ceiling read out of the
 retrieved text, not configured.
@@ -811,7 +830,7 @@ workaround.
 
 ```powershell
 python -m pytest tests/test_report.py          # 172 passed, 3 skipped (keyless)
-python -m pytest                               # 729 passed, 3 skipped
+python -m pytest                               # 741 passed, 3 skipped
 ```
 
 No API key, network, or paid token is needed: every unit test patches
@@ -977,7 +996,7 @@ succeeded.
 | Check | Real | Mocked |
 |---|---|---|
 | Preprocessing, split, metrics | ✅ real CSV, real models | — |
-| Risk prediction | ✅ real `risk_model.joblib` | — |
+| Risk prediction | ✅ real `models/selected_model.joblib` | — |
 | Attention | ✅ real PyTorch forward pass | — |
 | Retrieval | ✅ real ChromaDB index, real DOCX | — |
 | LLM report | — | ✅ `invoke_llm` patched |
@@ -990,7 +1009,7 @@ Everything up to and including retrieval is verified against real components.
 ```powershell
 python -m pytest tests/test_pipeline.py -v        # 72 passed
 python -m pytest tests/test_native_conflict.py -v # 21 passed
-python -m pytest                                  # 729 passed, 3 skipped
+python -m pytest                                  # 741 passed, 3 skipped
 ```
 
 The 3 skips need a live API key and are marked as such. No test requires network
@@ -1219,8 +1238,6 @@ results, and print a summary. Does **not** require the dashboard to be running.
 
 Inference is a library call rather than a command:
 
-Inference is a library call rather than a command:
-
 ```python
 from src.ml import predict
 
@@ -1279,3 +1296,46 @@ verified rather than assumed.
 * The guideline source document is never written to by any code path.
 * Patient data in this project contains no real personally identifiable information
   (PRD Section 1.6).
+
+---
+
+## 16. Limitations & future work
+
+The PRD's Section 10 portfolio-report structure asks for at least three concrete
+limitations. These are the real ones, not a generic list:
+
+1. **No live LLM output.** No `LLM_API_KEY` is configured, so Module 4's report
+   generation is verified only with a mocked LLM. The schema, the exactly-one-retry
+   policy, the forced disclaimer and the deterministic dose override are real and
+   tested, but `outputs/reports/` contains only `.gitkeep`. Supplying a key and
+   running `python -m src.pipeline --run` is the remaining Week 4 step.
+2. **Small dataset, single split.** The classifier trains on 400 rows and is scored
+   on 100. The F1 gap between Logistic Regression (0.7021) and Random Forest
+   (0.6263) is within the noise a single split can produce. Repeated stratified
+   cross-validation would quantify that uncertainty; the PRD's fixed seed is kept for
+   the headline result.
+3. **Chunk-size deviation from FR-3.1.** The implementation uses 120–220-token
+   chunks with 40-token overlap, not the requested 300–500. `all-MiniLM-L6-v2`
+   truncates at 256 tokens, so a 300–500-token chunk would be embedded from only its
+   prefix. A longer-context embedding model, or parent/child chunking, would satisfy
+   the literal range without that truncation.
+4. **Retrieval is wording-sensitive.** The measured 0.698 vs 0.497 score gap between
+   the guideline's own vocabulary and a paraphrase is a real failure mode. Hybrid
+   BM25 + dense retrieval or query rewriting is the obvious next step, evaluated on
+   the same eight queries.
+5. **Attention is untrained.** The heatmap demonstrates the mathematics, not biology.
+   The projections are randomly initialised and no supervised objective ties them to
+   a clinical outcome. Interpreting any pair as meaningful would be overclaiming.
+6. **Generated artifacts are not all committed.** Trained models, the vector store and
+   run logs are reproducible but gitignored. A clean clone must run the pipeline
+   before every dashboard panel can render; this is a deliberate size/reproducibility
+   trade-off.
+
+---
+
+## 17. Portfolio report
+
+`PORTFOLIO_REPORT.md` is the 4–6 page summary required by PRD Section 10. It follows
+the nine-section structure (Executive Summary, Architecture Diagram, Module 1–4
+Results, Dashboard, Limitations & Future Work, Reproduction Instructions) and cites
+the measured values in this README rather than repeating estimates.

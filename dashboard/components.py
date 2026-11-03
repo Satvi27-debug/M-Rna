@@ -562,6 +562,23 @@ def plot_latency_panel(ax: Any, data: LatencyPanelData | None = None) -> Any:
     ax.margins(y=0.18)
     ax.grid(axis="y", alpha=0.25, linewidth=0.6)
     ax.tick_params(axis="x", labelrotation=20)
+
+    # The PRD's Panel C compares retrieval latency with report-generation
+    # latency. Without a configured key no real generation latency exists, and
+    # the honest state is a named absence - not a mocked bar and not a silently
+    # missing series that looks like zero.
+    if "LLM Report" not in data.stages:
+        ax.text(
+            0.98,
+            0.94,
+            "LLM report latency unavailable\n(no API key configured)",
+            transform=ax.transAxes,
+            ha="right",
+            va="top",
+            fontsize=8,
+            color=styles.PALETTE["text-subtle"],
+            linespacing=1.3,
+        )
     return ax
 
 

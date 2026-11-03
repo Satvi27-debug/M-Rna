@@ -580,6 +580,45 @@ class TestCleanedDatasetPersistence:
         assert len(pd.read_csv(destination)) == 500
 
     @requires_implementation(preprocessing.save_clean_records)
+    def test_default_destination_also_writes_the_prd_named_copy(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """The Week 1 DoD names ``data/patient_records_clean.csv`` literally.
+
+        Both destinations are redirected into ``tmp_path`` so the test proves
+        the copy is byte-identical without touching the repository.
+        """
+        canonical = tmp_path / "processed" / "patient_records_clean.csv"
+        compatibility = tmp_path / "patient_records_clean.csv"
+        monkeypatch.setattr(config, "PROCESSED_PATIENT_CSV", canonical)
+        monkeypatch.setattr(config, "PRD_COMPAT_CLEAN_CSV", compatibility)
+
+        cleaned = preprocessing.impute_missing_values(
+            preprocessing.load_raw_records(config.RAW_PATIENT_CSV)
+        )
+        destination = preprocessing.save_clean_records(cleaned)
+
+        assert destination == canonical
+        assert compatibility.exists()
+        assert compatibility.read_bytes() == canonical.read_bytes()
+        assert len(pd.read_csv(compatibility)) == 500
+
+    @requires_implementation(preprocessing.save_clean_records)
+    def test_explicit_destination_does_not_write_the_prd_named_copy(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """A temporary destination must not leak a file into ``data/``."""
+        compatibility = tmp_path / "patient_records_clean.csv"
+        monkeypatch.setattr(config, "PRD_COMPAT_CLEAN_CSV", compatibility)
+
+        cleaned = preprocessing.impute_missing_values(
+            preprocessing.load_raw_records(config.RAW_PATIENT_CSV)
+        )
+        preprocessing.save_clean_records(cleaned, tmp_path / "clean.csv")
+
+        assert not compatibility.exists()
+
+    @requires_implementation(preprocessing.save_clean_records)
     def test_cleaned_dataset_has_zero_missing_values(self, tmp_path) -> None:
         cleaned = preprocessing.impute_missing_values(
             preprocessing.load_raw_records(config.RAW_PATIENT_CSV)

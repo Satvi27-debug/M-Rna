@@ -1628,6 +1628,26 @@ class TestLatencyRecording:
         report_generator.record_generation_latency(_make_run(), path)
         assert json.loads(path.read_text(encoding="utf-8"))["entries"]
 
+    def test_explicit_path_keeps_the_timing_out_of_the_live_log(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """A test's temporary log must not append a mocked latency to Panel C.
+
+        The bug this guards against: ``path`` redirected the generation log but
+        the stage-timing append still targeted ``config.LATENCY_LOG_JSON_PATH``,
+        so every test run added a fake ``llm_report`` bar to the dashboard.
+        """
+        live = tmp_path / "live_latency.json"
+        monkeypatch.setattr(config, "LATENCY_LOG_JSON_PATH", live)
+
+        generation = tmp_path / "generation_log.json"
+        report_generator.record_generation_latency(_make_run(), generation)
+
+        redirected = tmp_path / "latency_log.json"
+        assert redirected.exists(), "the stage timing should follow the test path"
+        assert json.loads(redirected.read_text(encoding="utf-8"))["stages"]
+        assert not live.exists(), "the live latency log must not be touched"
+
 
 class TestScopeGuard:
     """This stage must not reach beyond report generation."""

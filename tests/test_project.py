@@ -18,6 +18,7 @@ Two concerns live here:
 from __future__ import annotations
 
 import ast
+import json
 import re
 import sys
 from pathlib import Path
@@ -229,3 +230,93 @@ class TestSuppliedInputsAreImmutable:
             "a real .env exists in the tree; it must never be committed"
         )
         assert (ROOT / ".env.example").is_file(), ".env.example must ship"
+
+
+class TestPRDDeliverableArtifacts:
+    """The file-level deliverables the PRD names explicitly."""
+
+    def test_week1_eda_notebook_has_at_least_three_visualisations(self) -> None:
+        path = ROOT / "notebooks" / "01_data_eda.ipynb"
+        assert path.is_file(), "Week 1 DoD requires notebooks/01_data_eda.ipynb"
+        notebook = json.loads(path.read_text(encoding="utf-8"))
+        images = sum(
+            1
+            for cell in notebook["cells"]
+            for output in cell.get("outputs", [])
+            if "image/png" in output.get("data", {})
+        )
+        errors = [
+            output
+            for cell in notebook["cells"]
+            for output in cell.get("outputs", [])
+            if output.get("output_type") == "error"
+        ]
+        assert images >= 3, f"expected at least 3 embedded figures, found {images}"
+        assert not errors, "the EDA notebook must execute cleanly"
+
+    def test_recommended_attention_notebook_exists_and_ran(self) -> None:
+        path = ROOT / "notebooks" / "02_attention_math.ipynb"
+        assert path.is_file(), "PRD Section 3.3 recommends 02_attention_math.ipynb"
+        notebook = json.loads(path.read_text(encoding="utf-8"))
+        images = sum(
+            1
+            for cell in notebook["cells"]
+            for output in cell.get("outputs", [])
+            if "image/png" in output.get("data", {})
+        )
+        assert images >= 1, "the attention notebook should show the real heatmap"
+
+    def test_portfolio_report_has_the_nine_required_sections(self) -> None:
+        """PRD Section 10 names the structure; headings must match it."""
+        path = ROOT / "PORTFOLIO_REPORT.md"
+        assert path.is_file(), "PRD Section 10 requires a single portfolio report"
+        text = path.read_text(encoding="utf-8")
+        required = (
+            "## 1. Executive Summary",
+            "## 2. Architecture Diagram",
+            "## 3. Module 1 Results",
+            "## 4. Module 2 Results",
+            "## 5. Module 3 Results",
+            "## 6. Module 4 Results",
+            "## 7. Dashboard",
+            "## 8. Limitations & Future Work",
+            "## 9. Reproduction Instructions",
+        )
+        missing = [heading for heading in required if heading not in text]
+        assert not missing, f"portfolio report is missing sections: {missing}"
+        disclaimer = (
+            "This is a student engineering project and is not intended to provide "
+            "real clinical guidance."
+        )
+        assert disclaimer in text
+
+    def test_lock_file_pins_every_declared_distribution(self) -> None:
+        """Section 10.1 asks for pinned versions; requirements.txt holds bounds."""
+        declared = set(_declared_distributions())
+        lock_path = ROOT / "requirements.lock.txt"
+        assert lock_path.is_file(), "requirements.lock.txt must pin the resolved set"
+        locked = {}
+        for raw in lock_path.read_text(encoding="utf-8").splitlines():
+            line = raw.split("#")[0].strip()
+            if not line or line.startswith("-"):
+                continue
+            assert "==" in line, f"lock entry is not exact: {line}"
+            name = re.split(r"[<>=!~\[; ]", line)[0].strip().lower().replace("_", "-")
+            locked[name] = line
+        missing = sorted(declared - set(locked))
+        assert not missing, f"lock file does not pin: {missing}"
+
+    def test_prd_named_clean_csv_exists_with_zero_missing_values(self) -> None:
+        """Week 1 DoD names data/patient_records_clean.csv literally."""
+        import pandas as pd
+        from src import config
+
+        path = config.PRD_COMPAT_CLEAN_CSV
+        assert path.is_file(), f"missing PRD-named clean dataset: {path}"
+        frame = pd.read_csv(
+            path,
+            keep_default_na=config.CSV_KEEP_DEFAULT_NA,
+            na_values=list(config.CSV_NA_VALUES),
+        )
+        assert len(frame) == 500
+        assert int(frame.isna().sum().sum()) == 0

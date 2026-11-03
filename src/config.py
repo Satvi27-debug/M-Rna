@@ -524,6 +524,10 @@ REPORT_MARKDOWN_SUFFIX: str = ".md"
 
 PRD_COMPAT_MODEL_PATH: Path = OUTPUTS_DIR / "risk_model.joblib"
 PRD_COMPAT_VECTORSTORE_DIR: Path = OUTPUTS_DIR / "chroma_store"
+#: Week 1 Definition of Done names ``data/patient_records_clean.csv`` rather than
+#: the architecture's ``data/processed/`` location. ``save_clean_records`` writes
+#: the canonical file and this compatibility copy so both paths exist.
+PRD_COMPAT_CLEAN_CSV: Path = DATA_DIR / "patient_records_clean.csv"
 
 
 # ---------------------------------------------------------------------------
@@ -561,8 +565,10 @@ def describe_paths() -> dict[str, str]:
         "project_root": str(PROJECT_ROOT),
         "raw_patient_csv": str(RAW_PATIENT_CSV),
         "processed_patient_csv": str(PROCESSED_PATIENT_CSV),
+        "prd_compat_clean_csv": str(PRD_COMPAT_CLEAN_CSV),
         "guideline_docx": str(GUIDELINE_DOCX),
         "risk_model": str(RISK_MODEL_PATH),
+        "selected_model": str(SELECTED_MODEL_PATH),
         "chroma_persist_dir": str(CHROMA_PERSIST_DIR),
         "figures_dir": str(FIGURES_DIR),
         "reports_dir": str(REPORTS_DIR),

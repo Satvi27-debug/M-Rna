@@ -751,6 +751,47 @@ class TestVisualizationsStillUseRealData:
         data = components.load_latency_panel_data()
         assert all(v >= 0 for v in data.stages.values())
 
+    def test_latency_panel_names_the_missing_llm_measurement(self) -> None:
+        """Panel C must not turn an absent LLM measurement into a bar.
+
+        Without a configured key there is no real report latency. The honest
+        state is an explicit annotation; a mocked ``0.9 s`` value written by the
+        test suite (the bug this audit fixed) is not data.
+        """
+        import matplotlib.pyplot as plt
+
+        from dashboard import styles
+
+        data = components.LatencyPanelData(
+            stages={"RAG Retrieval": 0.0219}, retrieval_queries=8, report_runs=0
+        )
+        with styles.apply_style():
+            figure, axis = plt.subplots()
+            components.plot_latency_panel(axis, data)
+            texts = [text.get_text() for text in axis.texts]
+        plt.close(figure)
+
+        assert "LLM Report" not in data.stages
+        assert any("unavailable" in text for text in texts)
+
+    def test_latency_panel_does_not_annotate_a_present_llm_bar(self) -> None:
+        import matplotlib.pyplot as plt
+
+        from dashboard import styles
+
+        data = components.LatencyPanelData(
+            stages={"RAG Retrieval": 0.0219, "LLM Report": 0.9},
+            retrieval_queries=8,
+            report_runs=1,
+        )
+        with styles.apply_style():
+            figure, axis = plt.subplots()
+            components.plot_latency_panel(axis, data)
+            texts = [text.get_text() for text in axis.texts]
+        plt.close(figure)
+
+        assert not any("unavailable" in text for text in texts)
+
     def test_panel_readers_still_raise_for_an_absent_artifact(self, tmp_path) -> None:
         with pytest.raises(components.MissingArtifactError):
             components.load_roc_panel_data(

@@ -612,6 +612,28 @@ class TestPersistence:
             p.name for p in written.values()
         }
 
+    @requires_implementation(ml_evaluate.plot_classification_report)
+    def test_classification_report_figure_is_written(
+        self, evaluations, selection, tmp_path
+    ) -> None:
+        """Week 1 DoD: the selected model's report is a figure, not JSON only."""
+        from dashboard import app
+
+        path = ml_evaluate.plot_classification_report(evaluations, selection, tmp_path)
+        assert path.exists() and path.stat().st_size > 0
+        assert path.name == config.FIGURE_CLASSIFICATION_REPORT_FILENAME
+        dpi = app._read_png_dpi(path)
+        assert dpi is not None and dpi >= config.DASHBOARD_DPI
+
+    @requires_implementation(ml_evaluate.save_evaluation_artifacts)
+    def test_prd_named_classification_report_figure_exists(self) -> None:
+        path = config.FIGURES_DIR / config.FIGURE_CLASSIFICATION_REPORT_FILENAME
+        assert path.exists(), (
+            "the Week 1 DoD requires the classification report under "
+            "outputs/figures/, not only the JSON under outputs/logs/"
+        )
+        assert path.stat().st_size > 0
+
     @requires_implementation(ml_evaluate.plot_roc_comparison)
     def test_figures_meet_the_minimum_dpi(self, evaluations, tmp_path) -> None:
         """FR-5.3's 150 DPI floor, read from the file's own metadata.

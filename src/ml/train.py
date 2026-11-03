@@ -266,8 +266,8 @@ def save_model_artifacts(
         winner = trained.pipelines[selection.best_name]
         dump(winner, config.SELECTED_MODEL_PATH, "selected_model")
         # FR-1.7 names ``outputs/risk_model.joblib`` in its acceptance criteria.
-        # models/risk_model.joblib is this repository's canonical location, so
-        # the PRD-named copy is written alongside it.
+        # The canonical winner is ``models/selected_model.joblib``; the PRD-named
+        # copy is written alongside it so both locations exist.
         dump(winner, config.PRD_COMPAT_MODEL_PATH, "prd_compat_risk_model")
 
     return written

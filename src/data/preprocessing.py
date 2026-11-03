@@ -969,6 +969,12 @@ def save_clean_records(df: pd.DataFrame, path: Any = None) -> Any:
     Satisfies the Week 1 Definition of Done: the artifact exists and has zero
     missing values. The raw CSV is never touched.
 
+    When the default destination is used, a byte-identical compatibility copy is
+    also written to ``data/patient_records_clean.csv`` - the literal path named
+    by the Week 1 Definition of Done. Tests and callers that pass an explicit
+    ``path`` get exactly one file, so a temporary destination never leaks a copy
+    into the repository.
+
     Parameters
     ----------
     df:
@@ -983,7 +989,14 @@ def save_clean_records(df: pd.DataFrame, path: Any = None) -> Any:
     """
     from pathlib import Path
 
-    destination = Path(path) if path else config.PROCESSED_PATIENT_CSV
+    explicit_destination = path is not None
+    destination = Path(path) if explicit_destination else config.PROCESSED_PATIENT_CSV
     destination.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(destination, index=False)
+
+    if not explicit_destination:
+        compatibility = config.PRD_COMPAT_CLEAN_CSV
+        compatibility.parent.mkdir(parents=True, exist_ok=True)
+        compatibility.write_bytes(destination.read_bytes())
+
     return destination

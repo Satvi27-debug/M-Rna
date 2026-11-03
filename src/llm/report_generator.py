@@ -839,7 +839,12 @@ def record_generation_latency(run: ReportRun, path: Any = None) -> Any:
     run:
         Output of :func:`generate_report`.
     path:
-        Overrides the ``generation_log.json`` destination, for tests.
+        Overrides the ``generation_log.json`` destination, for tests. When set,
+        the stage-timing entry goes to a sibling ``latency_log.json`` in the same
+        directory instead of the real ``outputs/logs/`` file. Without that
+        redirection a test using a temporary generation log would still append a
+        mocked latency to the live log the dashboard reads - the exact kind of
+        fabricated measurement this project must not publish.
 
     Returns
     -------
@@ -847,6 +852,11 @@ def record_generation_latency(run: ReportRun, path: Any = None) -> Any:
         The generation log that was appended to.
     """
     generation_path = Path(path) if path else config.GENERATION_LOG_JSON_PATH
+    latency_path = (
+        generation_path.parent / "latency_log.json"
+        if path
+        else config.LATENCY_LOG_JSON_PATH
+    )
 
     entry = {
         "attempts": len(run.attempts),
@@ -860,7 +870,7 @@ def record_generation_latency(run: ReportRun, path: Any = None) -> Any:
     _append_json_entries(generation_path, entry, key="entries")
 
     _append_json_entries(
-        config.LATENCY_LOG_JSON_PATH,
+        latency_path,
         {
             "stage": "llm_report",
             "seconds": round(run.total_latency_s, 4),
