@@ -16,7 +16,7 @@ generation over regulatory guidelines, and schema-validated LLM report generatio
 All five modules are **implemented**, not stubbed. Every algorithmic body runs.
 
 ```
-741 passed, 3 skipped
+742 passed, 3 skipped
 ```
 
 The 3 skips require a live LLM API key and are labelled as such. No test needs
@@ -830,7 +830,7 @@ workaround.
 
 ```powershell
 python -m pytest tests/test_report.py          # 172 passed, 3 skipped (keyless)
-python -m pytest                               # 741 passed, 3 skipped
+python -m pytest                               # 742 passed, 3 skipped
 ```
 
 No API key, network, or paid token is needed: every unit test patches
@@ -1009,7 +1009,7 @@ Everything up to and including retrieval is verified against real components.
 ```powershell
 python -m pytest tests/test_pipeline.py -v        # 72 passed
 python -m pytest tests/test_native_conflict.py -v # 21 passed
-python -m pytest                                  # 741 passed, 3 skipped
+python -m pytest                                  # 742 passed, 3 skipped
 ```
 
 The 3 skips need a live API key and are marked as such. No test requires network

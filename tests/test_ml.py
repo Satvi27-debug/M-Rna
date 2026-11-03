@@ -487,6 +487,28 @@ class TestTrainedArtifactFidelity:
             "shadow the real artifact. Delete it, or regenerate with: python -m src.ml"
         )
 
+    def test_prd_named_fr17_copy_matches_the_selected_model(self) -> None:
+        """FR-1.7 names ``outputs/risk_model.joblib``; it must be the winner.
+
+        The canonical artifact is ``models/selected_model.joblib``. The PRD-named
+        copy is a second write of the same fitted pipeline, so it must be
+        byte-identical - anything else is a stale copy that could be reloaded by
+        mistake and produce different predictions.
+        """
+        from tests import requires_artifact
+
+        requires_artifact(config.PRD_COMPAT_MODEL_PATH, "python -m src.ml")
+        requires_artifact(config.SELECTED_MODEL_PATH, "python -m src.ml")
+
+        assert ml_predict._same_bytes(
+            config.PRD_COMPAT_MODEL_PATH, config.SELECTED_MODEL_PATH
+        ), "outputs/risk_model.joblib must be the current FR-1.7 winner"
+
+        import joblib
+
+        reloaded = joblib.load(config.PRD_COMPAT_MODEL_PATH)
+        assert hasattr(reloaded, "predict"), "the FR-1.7 copy must reload as a model"
+
     def test_artifact_declares_the_configured_seed(self) -> None:
         """``random_state`` must be set, or the forest is not reproducible."""
         from tests import requires_artifact
