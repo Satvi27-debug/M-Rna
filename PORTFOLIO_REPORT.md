@@ -22,10 +22,11 @@ The strongest measured result is Module 1: Logistic Regression reaches **F1 0.70
 ROC-AUC 0.7065). Module 2 produces a real 15×15 attention matrix whose rows sum to 1
 within **1.192e-07**. Module 3 stores 12 guideline chunks with 384-dimensional
 `all-MiniLM-L6-v2` embeddings and returns the requested top-3 results in
-**0.0128–0.0510 s** across eight evaluation queries. Module 4 is implemented and its
-schema, retry, and dose-safety rules are covered by tests, but **no live LLM call has been
-made** because no API key is configured in this environment; `outputs/reports/` is
-therefore empty by design. Module 5 renders the dashboard from saved artifacts only.
+**0.0128–0.0510 s** across eight evaluation queries. Module 4 is implemented **and
+exercised live**: `gemini-2.5-flash` produced three real JSON+Markdown report pairs in
+`outputs/reports/`, each schema-valid with the exact disclaimer and zero safety
+violations. The live HTTP `all` request returned **200 / completed**. Module 5 renders
+the dashboard from saved artifacts only.
 
 The project deliberately does not claim clinical validity. The 100 mcg figure is a
 **secondary clinician review trigger**, not a clinically established maximum safe dose;
@@ -205,7 +206,8 @@ disclaimer cannot survive.
 **Retry policy.** `generate_report(max_retries=1)` permits exactly two total attempts. A
 caller asking for more than one retry is rejected. If both attempts fail, the run raises
 `ReportGenerationError` carrying both failure reasons and no report is persisted. The two
-attempts are verified with a mocked LLM; no third attempt is possible.
+attempts are verified with a mocked LLM; no third attempt is possible. Each live Gemini
+run succeeded on **attempt 1 of 2**, with the attempt recorded in the report JSON.
 
 **Deterministic dose enforcement.** The LLM cannot bypass the dose rules. The retrieved
 guideline text supplies the bound, and Python applies it after validation. The 100 mcg
@@ -223,45 +225,49 @@ overridden to `False` when the submitted dose is 500 mcg. A separate output reco
 0.5 mg against a 100 mcg bound is clamped to 0.1 mg. The original submitted dose is never
 rewritten.
 
-**Live-output status — blocked.** No `LLM_API_KEY`/`OPENAI_API_KEY` is configured, so no
-live LLM report exists. The three report tests that require a key are skipped by design,
-and `outputs/reports/` contains only `.gitkeep`. To show the grounding path without
-fabricating a live result, the trace below ran the **real** Module 1 prediction and the
-**real** Module 3 retrieval for patient `P0001`, then used a mocked LLM response and the
-real Pydantic validator and deterministic enforcement. The LLM-authored prose is therefore
-mock; the risk, the cited text, the dose bound and the safety outcome are measured.
+**Live-output status — verified.** A real `gemini-2.5-flash` call was made through Gemini's
+OpenAI-compatible endpoint (`LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/`).
+The three key-gated report tests ran, and the three real report pairs in `outputs/reports/`
+were produced by the pipeline itself — not by a mock. The trace below is the most recent
+live run:
 
 - **Module 1 (real):** `P0001`, age 24, submitted dose 83.5 mcg, **Low risk** at
   probability **0.3320**.
 - **Module 3 (real):** 6 retrieval queries returned 7 unique chunks. The top chunk is
   `Section 2: Dosing Guidance by Age Band` (score **0.784324**), containing the applicable
   sentence *"Ages 12 to 64 years: standard adult dosing range as listed in Section 2.1."*
+- **Module 4 (real LLM):** one successful attempt, latency **13.7417 s**; the report below
+  is the model's actual JSON, validated by Pydantic and then safety-checked.
 - **Dose bound (real, read from retrieved text):** `max_mcg=100.0`,
   `threshold_kind="secondary_clinician_review"`,
   `clinical_maximum_established=False`.
 - **Enforcement (real):** `compliant=True`, `overridden=False`, submitted dose preserved
-  as `83.5 mcg`, `review_required=False`.
+  as `83.5 mcg`, `review_required=False`, zero violations.
 
 ```json
 {
-  "Eligible_For_Vaccine": true,
-  "Recommended_Dose_mg": 0.05,
+  "Eligible_For_Vaccine": false,
+  "Recommended_Dose_mg": 0.025,
   "Reasoning_Steps": [
-    "Module 1 predicted Low risk at probability 0.3320.",
-    "Module 3 retrieved the age-band rule: Ages 12 to 64 years: standard adult dosing range as listed in Section 2.1.",
-    "The recommended 0.05 mg is below the 100 mcg secondary-review threshold."
+    "The patient's age (24 years) falls within the 'Ages 12 to 64 years' band, for which standard adult dosing applies.",
+    "The patient's biomarker level is 4.53.",
+    "The guideline states that 'Patients presenting with an inflammatory biomarker level meaningfully above the normal reference range at the time of screening should have dosing deferred or receive the lowest clinically appropriate dose tier'.",
+    "The 'normal reference range' for the biomarker is not provided in the retrieved guideline excerpts.",
+    "Without the normal reference range, it is not possible to determine if the patient's biomarker level of 4.53 is 'meaningfully above' normal.",
+    "Due to insufficient information to confidently assess the biomarker level's impact on eligibility, the patient is conservatively deemed not eligible for the vaccine at this time.",
+    "As the patient is not eligible, the lowest dose tier stated in the guidelines (25 micrograms) is provided as the default recommended dose, converted to milligrams."
   ],
   "FDA_Safety_Warnings_Cited": [
-    "Ages 12 to 64 years: standard adult dosing range as listed in Section 2.1.",
-    "Doses above 100 micrograms are considered high-reactogenicity doses and require secondary clinician review before administration."
+    "Patients presenting with an inflammatory biomarker level meaningfully above the normal reference range at the time of screening should have dosing deferred until the biomarker returns to a normal range, or should receive the lowest clinically appropriate dose tier with enhanced post-administration monitoring, at the administering clinician's discretion.",
+    "primary-series doses commonly fall between 25 and 100 micrograms, while booster or lower-reactogenicity formulations are frequently dosed between 25 and 50 micrograms."
   ],
   "Disclaimer": "This is a student engineering project and is not intended to provide real clinical guidance."
 }
 ```
 
-This proves the schema, the grounding path and the deterministic enforcement, but the
-LLM prose is not presented as a clinical output. A fully live sample remains the one PRD
-Week 4 deliverable that cannot be produced honestly without a key.
+This is a real model output, not a clinical recommendation. The report stays conservative
+when the retrieved excerpts do not define the biomarker's normal range, which is exactly
+the behaviour the prompt and deterministic checks are designed to produce.
 
 ---
 
@@ -274,10 +280,10 @@ panels, generated from saved artifacts rather than recomputed predictions:
   highlighted.
 - **Panel B — Self-attention heatmap:** the 15×15 matrix from Module 2, labelled with the
   actual sequence tokens.
-- **Panel C — Latency:** measured RAG retrieval latency and, when a real generation log
-  exists, LLM report latency. With no API key, the panel shows the real RAG bar and an
-  explicit "LLM report latency unavailable (no API key configured)" annotation. It does not
-  invent an LLM bar.
+- **Panel C — Latency:** measured RAG retrieval latency (0.0219 s mean) and the real LLM
+  report latency (~15.8 s mean over three live Gemini runs). With no API key, the panel
+  instead shows an explicit "LLM report latency unavailable (no API key configured)"
+  annotation. It never invents an LLM bar.
 
 The web dashboard (`python -m dashboard.app`) serves six pages and consumes `/api/state`,
 `/api/run`, and `/api/artifacts/<name>`. Artifact names are resolved from a fixed allow-list;
@@ -291,11 +297,12 @@ an artifact is missing, the panel renders a named empty state instead of a subst
 
 ## 8. Limitations & Future Work
 
-1. **No live LLM output.** The most visible limitation is environmental: no API key is
-   configured, so Module 4's report generation is verified only with a mocked LLM. The
-   schema, retry count, disclaimer, and dose enforcement are real and tested, but
-   `outputs/reports/` is empty. Future work: supply a key, run one patient end to end, and
-   commit the resulting JSON/Markdown pair with its real latency.
+1. **Provider dependency and output variance.** Live output was verified with Gemini, not
+   OpenAI: the first key had exhausted credits, so `LLM_MODEL=gemini-2.5-flash` and Gemini's
+   OpenAI-compatible base URL are used. The three live runs were all valid but not
+   byte-identical (one judged the patient eligible, two conservatively not eligible).
+   Future work: use a provider's enforced JSON-schema mode and pin a deterministic model
+   version if identical reports are required.
 2. **Small dataset and one split.** The classifier is trained on 400 rows and evaluated on
    100. The F1 difference between Logistic Regression and Random Forest is within the
    noise a single split can produce. Future work: repeated stratified cross-validation and
@@ -327,8 +334,10 @@ python -m venv .venv
 pip install -r requirements.txt          # PRD lower bounds
 pip install -r requirements.lock.txt    # exact versions used for the reported results
 
-# 2. Optional live LLM (Module 4 only)
-cp .env.example .env                    # set LLM_API_KEY=... (never commit .env)
+# 2. Live LLM (Module 4 only) - .env is gitignored; never commit a real key
+cp .env.example .env                    # then set LLM_API_KEY=...
+# For Gemini: LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+#             LLM_MODEL=gemini-2.5-flash
 
 # 3. Module 1 — train, evaluate, serialise
 python -m src.ml

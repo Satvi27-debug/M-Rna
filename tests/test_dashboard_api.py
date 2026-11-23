@@ -792,6 +792,28 @@ class TestVisualizationsStillUseRealData:
 
         assert not any("unavailable" in text for text in texts)
 
+    def test_pipeline_stage_label_does_not_duplicate_the_llm_bar(self, tmp_path) -> None:
+        """``llm_report`` in the latency log must merge with the generation log."""
+        generation_path = tmp_path / "generation_log.json"
+        latency_path = tmp_path / "latency_log.json"
+        generation_path.write_text(
+            json.dumps({"entries": [{"latency_s": 1.25}]}), encoding="utf-8"
+        )
+        latency_path.write_text(
+            json.dumps({"stages": [
+                {"stage": "llm_report", "seconds": 1.25, "ok": True}
+            ]}),
+            encoding="utf-8",
+        )
+
+        data = components.load_latency_panel_data(
+            latency_log_path=latency_path, generation_log_path=generation_path
+        )
+
+        labels = [label.lower() for label in data.stages]
+        assert labels.count("llm report") == 1
+        assert "llm report" in labels
+
     def test_panel_readers_still_raise_for_an_absent_artifact(self, tmp_path) -> None:
         with pytest.raises(components.MissingArtifactError):
             components.load_roc_panel_data(

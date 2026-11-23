@@ -542,6 +542,64 @@ class TestStageFailureBlocksDownstream:
             pl.VIPPipeline().persist_outputs(pl.VIPResult(patient_id="P0001"))
         assert excinfo.value.stage == "persist"
 
+    def test_run_log_is_written_after_the_result_is_finalised(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """A completed run must not persist the default 'failed' empty result.
+
+        The log used to be written from ``persist_outputs`` before ``run`` set
+        ``status``, ``partial`` and ``timings``, so every saved summary claimed
+        failure with zero stages even for a fully successful run.
+        """
+        from types import SimpleNamespace
+
+        pipeline = pl.VIPPipeline(models_dir=tmp_path / "models")
+        captured = []
+
+        def capture(self, result):
+            captured.append(result.as_dict())
+            return tmp_path / "pipeline_run.json"
+
+        monkeypatch.setattr(pl.VIPPipeline, "_write_run_log", capture)
+
+        # Stage methods normally append their own timing. The mocked stages below
+        # bypass that, so record a completed timing here to keep the fixture
+        # faithful to a real successful run.
+        real_stage = pipeline._stage
+
+        def timed_stage(result, name, call):
+            value = real_stage(result, name, call)
+            if not any(t.stage == name for t in pipeline.timings):
+                pipeline.timings.append(
+                    pl.StageTiming(
+                        stage=name, seconds=0.0, ok=True,
+                        status=config.STAGE_COMPLETED,
+                    )
+                )
+            return value
+
+        monkeypatch.setattr(pipeline, "_stage", timed_stage)
+        monkeypatch.setattr(pipeline, "preprocess", lambda: {"ok": True})
+        monkeypatch.setattr(pipeline, "predict_risk", lambda *a: _fake_risk())
+        monkeypatch.setattr(pipeline, "run_attention", lambda *a: _fake_attention())
+        monkeypatch.setattr(
+            pipeline, "retrieve_guidelines", lambda *a: _make_retrievals([DOSE_CHUNK])
+        )
+        monkeypatch.setattr(
+            pipeline, "generate_report",
+            lambda *a: SimpleNamespace(safety=None, dose_review=None),
+        )
+        monkeypatch.setattr(pipeline, "persist_outputs", lambda *a: None)
+
+        result = pipeline.run(dict(RECORD))
+
+        assert captured, "the consolidated run log must be written"
+        logged = captured[-1]
+        assert logged["status"] == config.RUN_COMPLETED
+        assert len(logged["stages"]) == len(pl.PIPELINE_STAGES)
+        assert all(s["status"] == config.STAGE_COMPLETED for s in logged["stages"])
+        assert result.status == config.RUN_COMPLETED
+
 
 def preprocessing_broken():
     """Named error so the stage attribution is unambiguous."""

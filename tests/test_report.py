@@ -361,6 +361,22 @@ class TestPromptGrounding:
     def test_system_prompt_names_the_student_project_disclaimer(self) -> None:
         assert "student engineering project" in report_generator.SYSTEM_PROMPT.lower()
 
+    def test_prompt_states_the_exact_json_contract(self) -> None:
+        """Providers invent fields unless the output shape is explicit.
+
+        Live Gemini runs returned ``Recommended_Dose_mcg``, a string boolean and
+        a paragraph for ``Reasoning_Steps``. The prompt, not the validator, must
+        state the canonical contract so a real call can pass on first attempt.
+        """
+        messages = report_generator.build_prompt("Low", 0.1, ["chunk"], "a patient")
+        system = next(content for role, content in messages if role == "system")
+        for field in schemas.REQUIRED_REPORT_FIELDS:
+            assert field in system
+        assert "JSON boolean" in system
+        assert "array of strings" in system
+        assert "MILLIGRAMS" in system
+        assert config.REQUIRED_DISCLAIMER in system
+
 
 # ---------------------------------------------------------------------------
 # FR-4.3 - retry exactly once

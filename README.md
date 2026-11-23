@@ -16,25 +16,24 @@ generation over regulatory guidelines, and schema-validated LLM report generatio
 All five modules are **implemented**, not stubbed. Every algorithmic body runs.
 
 ```
-744 passed, 3 skipped
+749 passed, 1 skipped
 ```
 
-The 3 skips require a live LLM API key and are labelled as such. No test needs
-network access, a paid token or credentials.
+The single skip is the empty-state assertion that intentionally stands down once
+a real report exists. All three key-gated live-report tests ran against Gemini.
 
 | # | Module | Status | Evidence |
 |---|---|---|---|
 | 1 | Data & machine learning | Done | Logistic Regression F1 **0.7021**, ROC-AUC **0.7679** on a 100-row held-out test set; byte-identical across runs |
 | 2 | mRNA self-attention | Done | 15×15 matrix, rows sum to 1 within 1.2e-7; PyTorch/NumPy parity ≤1e-5 |
 | 3 | Regulatory RAG | Done | 12 chunks, 384-dim, top-3 retrieval in 0.013–0.051 s |
-| 4 | LLM + Pydantic report | Implemented; **live run blocked** | Schema + deterministic dose validation + retry-once are tested; **no real LLM call has been made** (no key configured), so `outputs/reports/` is empty |
-| 5 | End-to-end pipeline | Implemented; live report stage blocked | Stages 1–4 verified against real components; stage 5 fails honestly without a key |
+| 4 | LLM + Pydantic report | Done; **live call verified** | Real `gemini-2.5-flash` call produced a JSON+MD pair; exact disclaimer, zero safety violations, single successful attempt |
+| 5 | End-to-end pipeline | Done; **completed live run** | All six stages completed for `P0001`; `pipeline_run.json` records `completed` with six stage records |
 | 6 | Dashboard backend | Done | `POST /api/run` executes the real pipeline; verified live over HTTP with real retrieval and a real prediction |
 
-**What has *not* been exercised:** report generation against a live LLM. Stage 4
-and stage 5 of the pipeline are verified with `invoke_llm` patched. That is stated
-wherever it matters rather than glossed, because a mocked response is not evidence
-that a real call works.
+**Live exercise:** Module 4 was run against a real Gemini endpoint through its
+OpenAI-compatible API. The earlier mocked tests remain in the suite as regression
+guards, but the report artifacts and Panel C latency now come from real calls.
 
 **No fabricated results.** Every number above was measured. Where a result could
 not be produced — no API key, an uninformative guideline chunk, a missing artifact —
@@ -308,8 +307,9 @@ been added for popularity's sake.
 
 ### Environment variables
 
-A blank, gitignored `.env` already exists in this working tree. Fill in
-`LLM_API_KEY` there to enable live report generation. For a fresh deployment:
+A configured, gitignored `.env` exists in this working tree (Gemini key; never
+committed). It sets `LLM_MODEL=gemini-2.5-flash` and Gemini's OpenAI-compatible
+`LLM_BASE_URL`. For a fresh deployment:
 
 ```powershell
 Copy-Item .env.example .env      # Windows PowerShell
@@ -832,12 +832,13 @@ workaround.
 ### Commands
 
 ```powershell
-python -m pytest tests/test_report.py          # 173 passed, 3 skipped (keyless)
-python -m pytest                               # 744 passed, 3 skipped
+python -m pytest tests/test_report.py          # 176 passed, 1 skipped
+python -m pytest                               # 749 passed, 1 skipped
 ```
 
-No API key, network, or paid token is needed: every unit test patches
-`invoke_llm`, the single network seam. Tests needing a live key skip explicitly.
+The only skip is the report-stage empty-state check, which stands down once a
+real report exists. The three live-report tests now run against the configured
+provider; all other unit tests patch `invoke_llm`, the single network seam.
 
 ---
 
@@ -871,16 +872,15 @@ python -c "from src.pipeline import run_pipeline, load_patient; run_pipeline(loa
 ### Required environment variables
 
 The repository ships both `.env.example` (tracked template) and a local `.env`
-(gitignored, blank key) so you only need to paste your credential before a live run.
-`.env` is never committed; create it separately during deployment by copying the
-example.
+(gitignored, configured for the verified live run). `.env` is never committed;
+create it separately during deployment by copying the example.
 
 | Variable | Required | Purpose |
 |---|---|---|
 | `LLM_API_KEY` | **Only for the report stage** | Report generation. `OPENAI_API_KEY` is accepted as a fallback. |
 | `LLM_PROVIDER` | No | Defaults to `openai`; used in error messages. |
-| `LLM_MODEL` | No | Defaults to `gpt-4o-mini` in `src/config.py`. |
-| `LLM_BASE_URL` | No | Any OpenAI-compatible endpoint. Leave blank for official OpenAI. |
+| `LLM_MODEL` | No | Defaults to `gpt-4o-mini`; local `.env` uses `gemini-2.5-flash`. |
+| `LLM_BASE_URL` | No | Any OpenAI-compatible endpoint; local `.env` uses Gemini's `/v1beta/openai/`. |
 | `OPENAI_API_KEY` | No | Fallback credential name; leave blank if using `LLM_API_KEY`. |
 | `DASHBOARD_HOST` | No | Bind address, defaults to `127.0.0.1`. |
 | `DASHBOARD_PORT` | No | Bind port, defaults to `8000`; CLI `--port` overrides it. |
@@ -981,9 +981,30 @@ Boundary behaviour, tested:
 | 100.01 mcg | yes | forced `False` |
 | 500 mcg | yes | forced `False`, original preserved at 500 |
 
-### Honest failure: no key configured
+### Verified live run (Gemini)
 
-With no API key the pipeline runs stages 1–4 for real, then fails stage 5:
+With the configured key the full pipeline completed for `P0001`:
+
+```
+PIPELINE RUN  -  P0001  -  status: COMPLETED
+  [ok] preprocessing   0.223s
+  [ok] ml_prediction   0.155s
+  [ok] attention       0.023s
+  [ok] rag_retrieval  15.172s
+  [ok] llm_report     14.015s
+  [ok] persist         0.013s
+```
+
+Three real JSON+MD pairs exist in `outputs/reports/` (all `gemini-2.5-flash`,
+one successful attempt each). The latest is schema-compliant, carries the exact
+disclaimer, preserves the submitted `83.5 mcg`, and records zero safety
+violations. The live HTTP `all` request also returned **200 / completed**.
+Panel C now plots the real mean generation latency (~15.8 s over three runs)
+beside the measured RAG mean (0.0219 s).
+
+### Honest failure when no key is configured
+
+With no API key the pipeline still runs stages 1–4 for real, then fails stage 5:
 
 ```
 [fail] Pipeline stage 'llm_report' failed: No LLM credential is configured...
@@ -1011,21 +1032,22 @@ succeeded.
 | Risk prediction | ✅ real `models/selected_model.joblib` | — |
 | Attention | ✅ real PyTorch forward pass | — |
 | Retrieval | ✅ real ChromaDB index, real DOCX | — |
-| LLM report | — | ✅ `invoke_llm` patched |
+| LLM report | ✅ real Gemini call, JSON+MD pair | ✅ unit tests still patch `invoke_llm` for retry/schema cases |
 
-**No end-to-end run has made a real LLM call**, because no API key is configured.
-Everything up to and including retrieval is verified against real components.
+The live call used `gemini-2.5-flash` through Gemini's OpenAI-compatible
+endpoint. Mocked responses are used only for deterministic regression tests;
+they are not presented as generated evidence.
 
 ### Tests
 
 ```powershell
-python -m pytest tests/test_pipeline.py -v        # 72 passed
+python -m pytest tests/test_pipeline.py -v        # 74 passed
 python -m pytest tests/test_native_conflict.py -v # 21 passed
-python -m pytest                                  # 744 passed, 3 skipped
+python -m pytest                                  # 749 passed, 1 skipped
 ```
 
-The 3 skips need a live API key and are marked as such. No test requires network
-access, a paid token, or credentials.
+The single skip is the empty-state assertion that stands down after real report
+generation. The three live-report tests ran against Gemini and passed.
 
 ### Dashboard
 
@@ -1107,6 +1129,7 @@ Verified against real local components:
 | `rag` | **200** | 3 real chunks from ChromaDB, 0.018 s, cited to the DOCX |
 | `ml` | **200** | Low, p=0.331985, Logistic Regression |
 | `all` (no key) | **500** | `failed_stage: llm_report`, partial, no report |
+| `all` (live key) | **200** | Completed via CLI-equivalent path; six stages, real JSON+MD pair |
 | bad stage | 400 | `invalid_request` |
 | `Age: -1` | 400 | `'Age' must be between 0 and 130; got -1.` |
 | `/api/report/../../.env` | 404 | traversal refused |
@@ -1190,11 +1213,13 @@ unchanged. No substitute plot is generated for an empty panel.
 
 ### Honest limits
 
-- **No live LLM call has been made.** No API key configured. The `all` stage is
-  verified with `invoke_llm` mocked, and returns 500 honestly without a key.
+- **Live LLM was verified with Gemini, not with OpenAI.** The OpenAI key supplied
+  first had no credits; the completed run uses `gemini-2.5-flash` via Gemini's
+  OpenAI-compatible endpoint. The no-key path still fails honestly with 500.
 - **Attention sequence is the PRD sample**, `ACGUACGUACGGCUA`, labelled
   `sequence_source: "config_default"`. No patient sequence exists in the dataset.
-- **`outputs/reports/` is empty.** No fabricated report was committed as evidence.
+- **`outputs/reports/` holds three real JSON+MD pairs**, all for `P0001`. They are
+  gitignored generated artifacts; no mocked report was ever written there.
 - `HF_HUB_OFFLINE=1` avoids a transient Hugging Face connection failure seen once
   during testing.
 
@@ -1316,11 +1341,11 @@ verified rather than assumed.
 The PRD's Section 10 portfolio-report structure asks for at least three concrete
 limitations. These are the real ones, not a generic list:
 
-1. **No live LLM output.** No `LLM_API_KEY` is configured, so Module 4's report
-   generation is verified only with a mocked LLM. The schema, the exactly-one-retry
-   policy, the forced disclaimer and the deterministic dose override are real and
-   tested, but `outputs/reports/` contains only `.gitkeep`. Supplying a key and
-   running `python -m src.pipeline --run` is the remaining Week 4 step.
+1. **Provider dependency and output variance.** Module 4 is live-verified with
+   `gemini-2.5-flash` through Gemini's OpenAI-compatible endpoint (the first key had
+   exhausted credits). Three real report pairs exist, all valid but not byte-identical.
+   A provider-enforced JSON-schema mode and a pinned deterministic model version would
+   be needed for identical output on every run.
 2. **Small dataset, single split.** The classifier trains on 400 rows and is scored
    on 100. The F1 gap between Logistic Regression (0.7021) and Random Forest
    (0.6263) is within the noise a single split can produce. Repeated stratified

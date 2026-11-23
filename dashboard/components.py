@@ -469,6 +469,16 @@ def plot_attention_panel(ax: Any, data: AttentionPanelData | None = None) -> Any
 # ---------------------------------------------------------------------------
 
 
+#: Friendly labels for pipeline stage identifiers with a canonical capitalisation.
+#: Without this, the latency log's ``llm_report`` becomes "Llm Report" and the
+#: generation log's "LLM Report" appears as a second, duplicate bar in Panel C.
+_PANEL_STAGE_LABELS = {
+    "llm report": "LLM Report",
+    "rag retrieval": "RAG Retrieval",
+    "ml prediction": "ML Prediction",
+}
+
+
 @dataclass(frozen=True)
 class LatencyPanelData:
     """Mean latency per stage for Panel C.
@@ -530,7 +540,8 @@ def load_latency_panel_data(
     if pipeline is not None:
         for entry in pipeline.get("stages", []):
             if entry.get("ok") and isinstance(entry.get("seconds"), (int, float)):
-                key = str(entry.get("stage", "")).replace("_", " ").title()
+                raw_key = str(entry.get("stage", "")).replace("_", " ").strip()
+                key = _PANEL_STAGE_LABELS.get(raw_key.lower(), raw_key.title())
                 stages.setdefault(key, float(entry["seconds"]))
 
     return LatencyPanelData(

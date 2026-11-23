@@ -1,0 +1,86 @@
+{
+  "report": {
+    "Eligible_For_Vaccine": true,
+    "Recommended_Dose_mg": 0.0835,
+    "Reasoning_Steps": [
+      "Patient age (24 years) falls within the \"Ages 12 to 64 years\" age band.",
+      "The standard adult dosing range for primary-series doses is 25 to 100 micrograms.",
+      "The patient's proposed dose of 83.5 micrograms is within the standard adult dosing range.",
+      "Patient's prior reaction history is \"Mild\", which is not an absolute contraindication or a precaution requiring secondary review.",
+      "Patient has 1 pre-existing condition, which does not meet the \"Three or more relevant pre-existing conditions\" threshold for secondary review.",
+      "The guideline does not provide a normal reference range for the biomarker level, so it cannot be determined if the patient's level of 4.53 is \"meaningfully above the normal reference range\".",
+      "The candidate dose (83.5 micrograms) does not exceed 100 micrograms, therefore the contraindication \"Candidate dose exceeding 100 micrograms combined with an elevated biomarker level\" does not apply.",
+      "No other absolute contraindications or precautions requiring secondary review are met."
+    ],
+    "FDA_Safety_Warnings_Cited": [
+      "Ages 12 to 64 years: standard adult dosing range as listed in Section 2.1.",
+      "primary-series doses commonly fall between 25 and 100 micrograms",
+      "Patients presenting with an inflammatory biomarker level meaningfully above the normal reference range at the time of screening should have dosing deferred until the biomarker returns to a normal range, or should receive the lowest clinically appropriate dose tier with enhanced post-administration monitoring, at the administering clinician's discretion.",
+      "Prior history of a moderate reaction to an mRNA-based product, even if the reaction has since resolved.",
+      "Three or more relevant pre-existing conditions at time of screening.",
+      "Candidate dose exceeding 100 micrograms combined with an elevated biomarker level."
+    ],
+    "Disclaimer": "This is a student engineering project and is not intended to provide real clinical guidance."
+  },
+  "safety": {
+    "compliant": true,
+    "overridden": false,
+    "clinical_maximum_established": false,
+    "dose_review": {
+      "submitted_dose_mcg": 83.5,
+      "submitted_dose_preserved": true,
+      "unit": "mcg",
+      "threshold_mcg": 100.0,
+      "review_required": false,
+      "threshold_kind": "secondary_clinician_review",
+      "clinical_maximum_established": false,
+      "citation": "Doses above 100 micrograms are considered high-reactogenicity doses and require secondary clinician review before administration."
+    },
+    "violations": [],
+    "report": {
+      "Eligible_For_Vaccine": true,
+      "Recommended_Dose_mg": 0.0835,
+      "Reasoning_Steps": [
+        "Patient age (24 years) falls within the \"Ages 12 to 64 years\" age band.",
+        "The standard adult dosing range for primary-series doses is 25 to 100 micrograms.",
+        "The patient's proposed dose of 83.5 micrograms is within the standard adult dosing range.",
+        "Patient's prior reaction history is \"Mild\", which is not an absolute contraindication or a precaution requiring secondary review.",
+        "Patient has 1 pre-existing condition, which does not meet the \"Three or more relevant pre-existing conditions\" threshold for secondary review.",
+        "The guideline does not provide a normal reference range for the biomarker level, so it cannot be determined if the patient's level of 4.53 is \"meaningfully above the normal reference range\".",
+        "The candidate dose (83.5 micrograms) does not exceed 100 micrograms, therefore the contraindication \"Candidate dose exceeding 100 micrograms combined with an elevated biomarker level\" does not apply.",
+        "No other absolute contraindications or precautions requiring secondary review are met."
+      ],
+      "FDA_Safety_Warnings_Cited": [
+        "Ages 12 to 64 years: standard adult dosing range as listed in Section 2.1.",
+        "primary-series doses commonly fall between 25 and 100 micrograms",
+        "Patients presenting with an inflammatory biomarker level meaningfully above the normal reference range at the time of screening should have dosing deferred until the biomarker returns to a normal range, or should receive the lowest clinically appropriate dose tier with enhanced post-administration monitoring, at the administering clinician's discretion.",
+        "Prior history of a moderate reaction to an mRNA-based product, even if the reaction has since resolved.",
+        "Three or more relevant pre-existing conditions at time of screening.",
+        "Candidate dose exceeding 100 micrograms combined with an elevated biomarker level."
+      ],
+      "Disclaimer": "This is a student engineering project and is not intended to provide real clinical guidance."
+    }
+  },
+  "generation": {
+    "attempts": [
+      {
+        "attempt_number": 1,
+        "succeeded": true,
+        "failure_reason": "",
+        "latency_s": 19.7144
+      }
+    ],
+    "total_latency_s": 19.7144,
+    "json_path": null,
+    "markdown_path": null
+  },
+  "dose_bound": {
+    "max_mcg": 100.0,
+    "max_mg": 0.1,
+    "unit": "mcg",
+    "source_text": "Doses above 100 micrograms are considered high-reactogenicity doses and require secondary clinician review before administration.",
+    "derived_from_guideline": true
+  },
+  "disclaimer": "This is a student engineering project and is not intended to provide real clinical guidance.",
+  "generated_at": "2026-11-23T13:30:40+00:00"
+}

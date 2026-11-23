@@ -36,6 +36,22 @@ PROJECT_VERSION = "0.1.0"
 #: Repository root. ``src/config.py`` -> parent is ``src``, grandparent is the root.
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
 
+# Load .env *before* any os.getenv() call below. Without this, the non-secret
+# settings in .env (LLM_MODEL, LLM_BASE_URL, DASHBOARD_PORT, ...) are ignored
+# because config reads them at import time, before the report module's own
+# loader runs. override=False keeps an explicitly exported shell variable in
+# charge, which is the more specific instruction.
+_env_file = PROJECT_ROOT / ".env"
+if _env_file.is_file():
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(dotenv_path=_env_file, override=False)
+    except ImportError:
+        # python-dotenv is declared in requirements; a missing key is already
+        # handled by report_generator, so configuration degrades gracefully.
+        pass
+
 
 # ---------------------------------------------------------------------------
 # Directory layout (architecture rules 1, 2, 10, 11, 12)

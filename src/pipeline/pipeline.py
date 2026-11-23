@@ -859,7 +859,6 @@ class VIPPipeline:
 
                 json_path, markdown_path = llm_report.persist_report(run)
                 llm_report.record_generation_latency(run)
-                self._write_run_log(result)
 
             except Exception as exc:  # noqa: BLE001 - attributed to the stage
                 self.timings.append(watch.fail(exc))
@@ -984,6 +983,12 @@ class VIPPipeline:
             result.partial = any(
                 t.status == config.STAGE_COMPLETED for t in self.timings
             )
+            # Persist the partial verdict too, so a stale successful log cannot be
+            # mistaken for this failed run. The original stage error is primary.
+            try:
+                self._write_run_log(result)
+            except OSError:
+                pass
             raise
 
         result.status = derive_run_status(self.timings)
@@ -991,6 +996,10 @@ class VIPPipeline:
         # The stage records live on the pipeline; copy them so the returned result
         # is self-describing.
         result.timings = list(self.timings)
+        # Written here, not from persist_outputs: that stage runs before status,
+        # partial and timings are finalised, so the log used to claim "failed"
+        # with zero stages even for a fully completed run.
+        self._write_run_log(result)
         return result
 
     def _stage(self, result: "VIPResult", name: str, call: Any) -> Any:

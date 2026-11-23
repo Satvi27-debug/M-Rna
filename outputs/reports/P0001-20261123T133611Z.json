@@ -1,0 +1,76 @@
+{
+  "report": {
+    "Eligible_For_Vaccine": false,
+    "Recommended_Dose_mg": 0.025,
+    "Reasoning_Steps": [
+      "The patient's age (24 years) falls within the 'Ages 12 to 64 years' band, for which standard adult dosing applies.",
+      "The patient's biomarker level is 4.53.",
+      "The guideline states that 'Patients presenting with an inflammatory biomarker level meaningfully above the normal reference range at the time of screening should have dosing deferred or receive the lowest clinically appropriate dose tier'.",
+      "The 'normal reference range' for the biomarker is not provided in the retrieved guideline excerpts.",
+      "Without the normal reference range, it is not possible to determine if the patient's biomarker level of 4.53 is 'meaningfully above' normal.",
+      "Due to insufficient information to confidently assess the biomarker level's impact on eligibility, the patient is conservatively deemed not eligible for the vaccine at this time.",
+      "As the patient is not eligible, the lowest dose tier stated in the guidelines (25 micrograms) is provided as the default recommended dose, converted to milligrams."
+    ],
+    "FDA_Safety_Warnings_Cited": [
+      "Patients presenting with an inflammatory biomarker level meaningfully above the normal reference range at the time of screening should have dosing deferred until the biomarker returns to a normal range, or should receive the lowest clinically appropriate dose tier with enhanced post-administration monitoring, at the administering clinician's discretion.",
+      "primary-series doses commonly fall between 25 and 100 micrograms, while booster or lower-reactogenicity formulations are frequently dosed between 25 and 50 micrograms."
+    ],
+    "Disclaimer": "This is a student engineering project and is not intended to provide real clinical guidance."
+  },
+  "safety": {
+    "compliant": true,
+    "overridden": false,
+    "clinical_maximum_established": false,
+    "dose_review": {
+      "submitted_dose_mcg": 83.5,
+      "submitted_dose_preserved": true,
+      "unit": "mcg",
+      "threshold_mcg": 100.0,
+      "review_required": false,
+      "threshold_kind": "secondary_clinician_review",
+      "clinical_maximum_established": false,
+      "citation": "Doses above 100 micrograms are considered high-reactogenicity doses and require secondary clinician review before administration."
+    },
+    "violations": [],
+    "report": {
+      "Eligible_For_Vaccine": false,
+      "Recommended_Dose_mg": 0.025,
+      "Reasoning_Steps": [
+        "The patient's age (24 years) falls within the 'Ages 12 to 64 years' band, for which standard adult dosing applies.",
+        "The patient's biomarker level is 4.53.",
+        "The guideline states that 'Patients presenting with an inflammatory biomarker level meaningfully above the normal reference range at the time of screening should have dosing deferred or receive the lowest clinically appropriate dose tier'.",
+        "The 'normal reference range' for the biomarker is not provided in the retrieved guideline excerpts.",
+        "Without the normal reference range, it is not possible to determine if the patient's biomarker level of 4.53 is 'meaningfully above' normal.",
+        "Due to insufficient information to confidently assess the biomarker level's impact on eligibility, the patient is conservatively deemed not eligible for the vaccine at this time.",
+        "As the patient is not eligible, the lowest dose tier stated in the guidelines (25 micrograms) is provided as the default recommended dose, converted to milligrams."
+      ],
+      "FDA_Safety_Warnings_Cited": [
+        "Patients presenting with an inflammatory biomarker level meaningfully above the normal reference range at the time of screening should have dosing deferred until the biomarker returns to a normal range, or should receive the lowest clinically appropriate dose tier with enhanced post-administration monitoring, at the administering clinician's discretion.",
+        "primary-series doses commonly fall between 25 and 100 micrograms, while booster or lower-reactogenicity formulations are frequently dosed between 25 and 50 micrograms."
+      ],
+      "Disclaimer": "This is a student engineering project and is not intended to provide real clinical guidance."
+    }
+  },
+  "generation": {
+    "attempts": [
+      {
+        "attempt_number": 1,
+        "succeeded": true,
+        "failure_reason": "",
+        "latency_s": 14.0136
+      }
+    ],
+    "total_latency_s": 14.0136,
+    "json_path": null,
+    "markdown_path": null
+  },
+  "dose_bound": {
+    "max_mcg": 100.0,
+    "max_mg": 0.1,
+    "unit": "mcg",
+    "source_text": "Doses above 100 micrograms are considered high-reactogenicity doses and require secondary clinician review before administration.",
+    "derived_from_guideline": true
+  },
+  "disclaimer": "This is a student engineering project and is not intended to provide real clinical guidance.",
+  "generated_at": "2026-11-23T13:36:11+00:00"
+}

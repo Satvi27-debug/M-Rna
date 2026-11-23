@@ -71,6 +71,31 @@ Required safety constraints:
    a student engineering project and not real clinical guidance.
 """
 
+#: Appended to the system message by :func:`build_prompt`. Without an explicit
+#: contract, providers invent their own field names and types (e.g.
+#: ``Recommended_Dose_mcg`` instead of ``Recommended_Dose_mg``, a string instead
+#: of a boolean, or a paragraph instead of a list). Validation must stay strict,
+#: so the fix belongs in the prompt rather than in a permissive parser.
+OUTPUT_CONTRACT = (
+    "\n\nExact output contract - return ONLY one JSON object with exactly these "
+    "five keys, spelled and capitalised exactly as shown:\n"
+    "{\n"
+    '  "Eligible_For_Vaccine": true,               // JSON boolean, never a string\n'
+    '  "Recommended_Dose_mg": 0.0835,              // JSON number, in MILLIGRAMS\n'
+    '  "Reasoning_Steps": ["step one", "step two"],// array of strings, not prose\n'
+    '  "FDA_Safety_Warnings_Cited": ["excerpt"],   // array of exact excerpts\n'
+    '  "Disclaimer": ' + json.dumps(config.REQUIRED_DISCLAIMER) + "\n"
+    "}\n"
+    "The guideline excerpts state doses in micrograms (mcg). Convert to "
+    "milligrams for Recommended_Dose_mg (1 mcg = 0.001 mg); never put a "
+    "microgram number in that field. Eligible_For_Vaccine must be the literal "
+    "JSON boolean true or false, never \"yes\", \"eligible\" or \"N/A\". "
+    "Reasoning_Steps must be an array of short strings, not one paragraph. "
+    "Recommended_Dose_mg must always be a number, even when the patient is not "
+    "eligible: in that case use the lowest dose tier stated in the excerpts, "
+    "converted to mg. Do not add any other keys (no Patient_ID)."
+)
+
 
 #: Shown to the LLM when the retrieved chunks do not settle the question.
 #: Implements constraint 3: refuse to be confidently wrong.
@@ -342,7 +367,7 @@ def build_prompt(
         "above."
     )
 
-    return [("system", SYSTEM_PROMPT), ("user", user)]
+    return [("system", SYSTEM_PROMPT + OUTPUT_CONTRACT), ("user", user)]
 
 
 # ---------------------------------------------------------------------------
