@@ -214,7 +214,7 @@ even when the model omits or weakens it.
 `RecursiveCharacterTextSplitter` counts characters. FR-3.1 specifies *tokens*. Treating
 the splitter's `chunk_size=500` as 500 tokens would silently produce ~120-token chunks
 and fail FR-3.1 while appearing correct. So sizes are declared in characters
-(`CHUNK_SIZE_CHARS = 1500`) and `verify_chunk_bounds` measures actual token counts as the
+(`CHUNK_SIZE_CHARS = 740`) and `verify_chunk_bounds` measures actual token counts as the
 acceptance test.
 
 **The `.docx` is read with the standard library.** The PRD describes the guideline source
@@ -995,7 +995,7 @@ PIPELINE RUN  -  P0001  -  status: COMPLETED
   [ok] persist         0.013s
 ```
 
-Four real JSON+MD pairs exist in `outputs/reports/` (all `gemini-2.5-flash`,
+Five real JSON+MD pairs exist in `outputs/reports/` (all `gemini-2.5-flash`,
 one successful attempt each). The latest is schema-compliant, carries the exact
 disclaimer, preserves the submitted `83.5 mcg`, and records zero safety
 violations. The live HTTP `all` request also returned **200 / completed**.
