@@ -16,7 +16,7 @@ generation over regulatory guidelines, and schema-validated LLM report generatio
 All five modules are **implemented**, not stubbed. Every algorithmic body runs.
 
 ```
-742 passed, 3 skipped
+744 passed, 3 skipped
 ```
 
 The 3 skips require a live LLM API key and are labelled as such. No test needs
@@ -308,15 +308,18 @@ been added for popularity's sake.
 
 ### Environment variables
 
+A blank, gitignored `.env` already exists in this working tree. Fill in
+`LLM_API_KEY` there to enable live report generation. For a fresh deployment:
+
 ```powershell
 Copy-Item .env.example .env      # Windows PowerShell
 cp .env.example .env            # macOS / Linux
 ```
 
-Only `LLM_API_KEY` is a secret, and it is needed for Modules 3–4 only. `.env` is listed
+Only `LLM_API_KEY` is a secret, and it is needed for Module 4 only. `.env` is listed
 in `.gitignore` and **must never be committed**; `.env.example` contains variable names
-only, with no credentials. Keys are read at call time inside `load_api_key`, never at
-import time, so the test suite runs without a key.
+and safe defaults only, with no credentials. Keys are read at call time inside
+`load_api_key`, never at import time, so the test suite runs without a key.
 
 ---
 
@@ -829,8 +832,8 @@ workaround.
 ### Commands
 
 ```powershell
-python -m pytest tests/test_report.py          # 172 passed, 3 skipped (keyless)
-python -m pytest                               # 742 passed, 3 skipped
+python -m pytest tests/test_report.py          # 173 passed, 3 skipped (keyless)
+python -m pytest                               # 744 passed, 3 skipped
 ```
 
 No API key, network, or paid token is needed: every unit test patches
@@ -867,11 +870,20 @@ python -c "from src.pipeline import run_pipeline, load_patient; run_pipeline(loa
 
 ### Required environment variables
 
+The repository ships both `.env.example` (tracked template) and a local `.env`
+(gitignored, blank key) so you only need to paste your credential before a live run.
+`.env` is never committed; create it separately during deployment by copying the
+example.
+
 | Variable | Required | Purpose |
 |---|---|---|
 | `LLM_API_KEY` | **Only for the report stage** | Report generation. `OPENAI_API_KEY` is accepted as a fallback. |
+| `LLM_PROVIDER` | No | Defaults to `openai`; used in error messages. |
 | `LLM_MODEL` | No | Defaults to `gpt-4o-mini` in `src/config.py`. |
-| `LLM_BASE_URL` | No | Any OpenAI-compatible endpoint. |
+| `LLM_BASE_URL` | No | Any OpenAI-compatible endpoint. Leave blank for official OpenAI. |
+| `OPENAI_API_KEY` | No | Fallback credential name; leave blank if using `LLM_API_KEY`. |
+| `DASHBOARD_HOST` | No | Bind address, defaults to `127.0.0.1`. |
+| `DASHBOARD_PORT` | No | Bind port, defaults to `8000`; CLI `--port` overrides it. |
 
 Stages 1–4 and the dashboard run entirely locally with **no** API key. The key is
 read at call time via `python-dotenv`; `.env` is gitignored and never committed.
@@ -1009,7 +1021,7 @@ Everything up to and including retrieval is verified against real components.
 ```powershell
 python -m pytest tests/test_pipeline.py -v        # 72 passed
 python -m pytest tests/test_native_conflict.py -v # 21 passed
-python -m pytest                                  # 742 passed, 3 skipped
+python -m pytest                                  # 744 passed, 3 skipped
 ```
 
 The 3 skips need a live API key and are marked as such. No test requires network

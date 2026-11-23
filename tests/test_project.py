@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -226,10 +227,35 @@ class TestSuppliedInputsAreImmutable:
     def test_env_file_is_ignored_and_only_the_example_is_tracked(self) -> None:
         gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
         assert ".env" in gitignore, ".env must be gitignored"
-        assert not (ROOT / ".env").exists(), (
-            "a real .env exists in the tree; it must never be committed"
-        )
         assert (ROOT / ".env.example").is_file(), ".env.example must ship"
+
+        # A local .env is allowed so the deployment template can be filled in
+        # on this machine. It must remain untracked and ignored by Git.
+        tracked = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", ".env"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert tracked.returncode != 0, ".env must never be tracked by Git"
+
+    def test_env_example_declares_every_runtime_variable(self) -> None:
+        """The deployment template must not omit a setting the code reads."""
+        text = (ROOT / ".env.example").read_text(encoding="utf-8")
+        required = (
+            "LLM_API_KEY",
+            "LLM_PROVIDER",
+            "LLM_MODEL",
+            "LLM_BASE_URL",
+            "OPENAI_API_KEY",
+            "DASHBOARD_HOST",
+            "DASHBOARD_PORT",
+        )
+        missing = [name for name in required if not re.search(rf"^{name}=", text, re.M)]
+        assert not missing, f".env.example is missing variables: {missing}"
+        for name in required:
+            assert f"{name}=sk-" not in text, "the template must not contain a key"
 
 
 class TestPRDDeliverableArtifacts:

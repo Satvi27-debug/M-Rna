@@ -37,13 +37,27 @@ from tests import requires_implementation
 
 
 def llm_key_available() -> bool:
-    """True when an LLM credential is configured in the environment."""
-    if os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY"):
-        return True
+    """True when a **non-empty** LLM credential is configured.
+
+    A blank ``.env`` is shipped as a local template, so the mere presence of the
+    variable name is not enough: a live test must not run until someone has
+    actually pasted a key after the equals sign.
+    """
+    for variable in ("LLM_API_KEY", "OPENAI_API_KEY"):
+        if os.getenv(variable, "").strip():
+            return True
+
     env_file = Path(config.PROJECT_ROOT) / ".env"
-    return env_file.exists() and "LLM_API_KEY=" in env_file.read_text(
-        encoding="utf-8"
-    )
+    if not env_file.exists():
+        return False
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        entry = line.strip()
+        if not entry or entry.startswith("#") or "=" not in entry:
+            continue
+        name, _, value = entry.partition("=")
+        if name.strip() in {"LLM_API_KEY", "OPENAI_API_KEY"} and value.strip():
+            return True
+    return False
 
 
 requires_llm = pytest.mark.skipif(

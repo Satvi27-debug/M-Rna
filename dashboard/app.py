@@ -485,16 +485,20 @@ class VIPRequestHandler(BaseHTTPRequestHandler):
         sys.stderr.write(f"  {self.address_string()} {format % args}\n")
 
 
-def serve(host: str = "127.0.0.1", port: int = 8000, open_browser: bool = True) -> None:
+def serve(
+    host: str = config.DASHBOARD_HOST,
+    port: int = config.DASHBOARD_PORT,
+    open_browser: bool = True,
+) -> None:
     """Run the interface until interrupted.
 
     Parameters
     ----------
     host:
-        Bind address. Defaults to loopback, so the interface is never exposed to
-        the network by accident.
+        Bind address. Defaults to loopback via ``DASHBOARD_HOST``, so the
+        interface is never exposed to the network by accident.
     port:
-        Bind port.
+        Bind port, defaulting to ``DASHBOARD_PORT``.
     open_browser:
         Open the default browser once the server is listening.
     """
@@ -551,8 +555,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="dashboard.app", description="mRNA VIP interface and figure renderer"
     )
-    parser.add_argument("--host", default="127.0.0.1", help="Bind address")
-    parser.add_argument("--port", type=int, default=8000, help="Bind port")
+    parser.add_argument(
+        "--host", default=config.DASHBOARD_HOST, help="Bind address (DASHBOARD_HOST)"
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=config.DASHBOARD_PORT,
+        help="Bind port (DASHBOARD_PORT)",
+    )
     parser.add_argument(
         "--no-browser", action="store_true", help="Do not open a browser window"
     )

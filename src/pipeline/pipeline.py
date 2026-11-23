@@ -524,7 +524,7 @@ class VIPPipeline:
                 )
                 preprocessing.save_clean_records(cleaned)
             except Exception as exc:  # noqa: BLE001 - attributed to the stage
-                self.timings.append(watch.as_timing())
+                self.timings.append(watch.fail(exc))
                 raise PipelineError("preprocessing", exc) from exc
 
         self.split = split
@@ -556,19 +556,16 @@ class VIPPipeline:
             try:
                 prediction = ml_predict.predict_patient(patient_record)
             except Exception as exc:  # noqa: BLE001 - attributed to the stage
-                self.timings.append(watch.as_timing())
+                self.timings.append(watch.fail(exc))
                 raise PipelineError("ml_prediction", exc) from exc
 
         if prediction.risk_probability is None:
-            watch.detail = "no model produced a probability"
-            self.timings.append(watch.as_timing())
-            raise PipelineError(
-                "ml_prediction",
-                ml_predict.PredictionError(
-                    "No trained model is available, so no risk prediction could be "
-                    f"produced. Train first: python -m src.ml"
-                ),
+            failure = ml_predict.PredictionError(
+                "No trained model is available, so no risk prediction could be "
+                f"produced. Train first: python -m src.ml"
             )
+            self.timings.append(watch.fail(failure))
+            raise PipelineError("ml_prediction", failure)
 
         self.timings.append(watch.as_timing())
         return prediction
@@ -601,7 +598,7 @@ class VIPPipeline:
                 result = self_attention.run_self_attention(validated)
                 written = self_attention.save_attention_artifacts(result)
             except Exception as exc:  # noqa: BLE001 - attributed to the stage
-                self.timings.append(watch.as_timing())
+                self.timings.append(watch.fail(exc))
                 raise PipelineError("attention", exc) from exc
 
         self.timings.append(watch.as_timing())
@@ -730,7 +727,7 @@ class VIPPipeline:
                     for question in queries
                 ]
             except Exception as exc:  # noqa: BLE001 - attributed to the stage
-                self.timings.append(watch.as_timing())
+                self.timings.append(watch.fail(exc))
                 raise PipelineError("rag_retrieval", exc) from exc
 
         self.timings.append(watch.as_timing())
@@ -805,10 +802,10 @@ class VIPPipeline:
                 )
             except llm_report.MissingAPIKeyError as exc:
                 # Actionable, and never disguised as a success.
-                self.timings.append(watch.as_timing())
+                self.timings.append(watch.fail(exc))
                 raise PipelineError("llm_report", exc) from exc
             except Exception as exc:  # noqa: BLE001 - attributed to the stage
-                self.timings.append(watch.as_timing())
+                self.timings.append(watch.fail(exc))
                 raise PipelineError("llm_report", exc) from exc
 
         # Re-run the deterministic checks with the submitted dose attached, so the
@@ -865,7 +862,7 @@ class VIPPipeline:
                 self._write_run_log(result)
 
             except Exception as exc:  # noqa: BLE001 - attributed to the stage
-                self.timings.append(watch.as_timing())
+                self.timings.append(watch.fail(exc))
                 raise PipelineError("persist", exc) from exc
 
         self.timings.append(watch.as_timing())
@@ -1081,7 +1078,7 @@ class VIPPipeline:
 
                 path = dashboard_app.build_dashboard(save_path)
             except Exception as exc:  # noqa: BLE001 - attributed to the stage
-                self.timings.append(watch.as_timing())
+                self.timings.append(watch.fail(exc))
                 raise PipelineError("build_dashboard", exc) from exc
 
         self.timings.append(watch.as_timing())
@@ -1171,6 +1168,21 @@ class Stopwatch:
             error=self.error,
             required=required,
         )
+
+    def fail(self, exc: BaseException) -> StageTiming:
+        """Snapshot a **caught** exception as a failed timing.
+
+        ``__exit__`` never sees an exception that a stage catches inside its own
+        ``with`` block. Calling :meth:`as_timing` from an ``except`` branch would
+        therefore record ``status="completed"`` for a stage that failed - exactly
+        the false success this module exists to prevent. Call this from every
+        caught-failure branch instead.
+        """
+        self.elapsed_s = time.perf_counter() - self.start
+        self.ok = False
+        self.error = type(exc).__name__
+        self.detail = str(exc)
+        return self.as_timing()
 
 
 def save_latency_log(

@@ -770,6 +770,24 @@ class TestStopwatch:
         assert timing.error == "ValueError"
         assert timing.detail == "boom"
 
+    def test_caught_exception_cannot_be_recorded_as_completed(self) -> None:
+        """Stage methods catch failures inside their ``with`` blocks.
+
+        ``Stopwatch.__exit__`` therefore sees no exception and ``as_timing()``
+        would default to ``completed``. Every caught-failure branch must use
+        ``fail()`` so the dashboard and run log cannot show a failed stage as ok.
+        """
+        with pl.Stopwatch("llm_report") as watch:
+            try:
+                raise RuntimeError("provider rejected the key")
+            except RuntimeError as exc:
+                timing = watch.fail(exc)
+
+        assert timing.status == config.STAGE_FAILED
+        assert timing.error == "RuntimeError"
+        assert timing.detail == "provider rejected the key"
+        assert timing.seconds >= 0.0
+
     def test_optional_stage_can_be_marked_not_required(self) -> None:
         with pl.Stopwatch("x", required=False) as watch:
             pass

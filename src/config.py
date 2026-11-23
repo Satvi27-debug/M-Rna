@@ -332,6 +332,31 @@ LLM_TEMPERATURE: float = 0.0
 #: FR-4.3 requires exactly one retry after a schema validation failure.
 LLM_MAX_RETRIES: int = 1
 
+
+# ---------------------------------------------------------------------------
+# Module 6 - Dashboard server (non-secret deployment settings)
+# ---------------------------------------------------------------------------
+
+
+def _env_port(name: str, default: int) -> int:
+    """Read a TCP port from the environment, with a clear error on bad input."""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer port, got {raw!r}") from exc
+    if not 1 <= value <= 65535:
+        raise ValueError(f"{name} must be between 1 and 65535, got {value}")
+    return value
+
+
+#: Loopback by default; set DASHBOARD_HOST=0.0.0.0 only when the interface is
+#: intentionally exposed. ``--host`` on the CLI still takes precedence.
+DASHBOARD_HOST: str = os.getenv("DASHBOARD_HOST", "127.0.0.1").strip() or "127.0.0.1"
+DASHBOARD_PORT: int = _env_port("DASHBOARD_PORT", 8000)
+
 #: FR-4.5 requires this notice in every report, without exception. The report
 #: validator overwrites the field rather than trusting the model's output, and
 #: the interface displays the same sentence in its disclaimer block.
