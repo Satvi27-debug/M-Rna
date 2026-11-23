@@ -995,11 +995,11 @@ PIPELINE RUN  -  P0001  -  status: COMPLETED
   [ok] persist         0.013s
 ```
 
-Three real JSON+MD pairs exist in `outputs/reports/` (all `gemini-2.5-flash`,
+Four real JSON+MD pairs exist in `outputs/reports/` (all `gemini-2.5-flash`,
 one successful attempt each). The latest is schema-compliant, carries the exact
 disclaimer, preserves the submitted `83.5 mcg`, and records zero safety
 violations. The live HTTP `all` request also returned **200 / completed**.
-Panel C now plots the real mean generation latency (~15.8 s over three runs)
+Panel C now plots the real mean generation latency (~15.4 s over four runs)
 beside the measured RAG mean (0.0219 s).
 
 ### Honest failure when no key is configured
@@ -1218,7 +1218,7 @@ unchanged. No substitute plot is generated for an empty panel.
   OpenAI-compatible endpoint. The no-key path still fails honestly with 500.
 - **Attention sequence is the PRD sample**, `ACGUACGUACGGCUA`, labelled
   `sequence_source: "config_default"`. No patient sequence exists in the dataset.
-- **`outputs/reports/` holds three real JSON+MD pairs**, all for `P0001`. They are
+- **`outputs/reports/` holds four real JSON+MD pairs**, all for `P0001`. They are
   gitignored generated artifacts; no mocked report was ever written there.
 - `HF_HUB_OFFLINE=1` avoids a transient Hugging Face connection failure seen once
   during testing.
@@ -1343,7 +1343,7 @@ limitations. These are the real ones, not a generic list:
 
 1. **Provider dependency and output variance.** Module 4 is live-verified with
    `gemini-2.5-flash` through Gemini's OpenAI-compatible endpoint (the first key had
-   exhausted credits). Three real report pairs exist, all valid but not byte-identical.
+   exhausted credits). Four real report pairs exist, all valid but not byte-identical.
    A provider-enforced JSON-schema mode and a pinned deterministic model version would
    be needed for identical output on every run.
 2. **Small dataset, single split.** The classifier trains on 400 rows and is scored

@@ -23,7 +23,7 @@ ROC-AUC 0.7065). Module 2 produces a real 15×15 attention matrix whose rows sum
 within **1.192e-07**. Module 3 stores 12 guideline chunks with 384-dimensional
 `all-MiniLM-L6-v2` embeddings and returns the requested top-3 results in
 **0.0128–0.0510 s** across eight evaluation queries. Module 4 is implemented **and
-exercised live**: `gemini-2.5-flash` produced three real JSON+Markdown report pairs in
+exercised live**: `gemini-2.5-flash` produced four real JSON+Markdown report pairs in
 `outputs/reports/`, each schema-valid with the exact disclaimer and zero safety
 violations. The live HTTP `all` request returned **200 / completed**. Module 5 renders
 the dashboard from saved artifacts only.
@@ -227,7 +227,7 @@ rewritten.
 
 **Live-output status — verified.** A real `gemini-2.5-flash` call was made through Gemini's
 OpenAI-compatible endpoint (`LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/`).
-The three key-gated report tests ran, and the three real report pairs in `outputs/reports/`
+The three key-gated report tests ran, and the four real report pairs in `outputs/reports/`
 were produced by the pipeline itself — not by a mock. The trace below is the most recent
 live run:
 
@@ -281,7 +281,7 @@ panels, generated from saved artifacts rather than recomputed predictions:
 - **Panel B — Self-attention heatmap:** the 15×15 matrix from Module 2, labelled with the
   actual sequence tokens.
 - **Panel C — Latency:** measured RAG retrieval latency (0.0219 s mean) and the real LLM
-  report latency (~15.8 s mean over three live Gemini runs). With no API key, the panel
+  report latency (~15.4 s mean over four live Gemini runs). With no API key, the panel
   instead shows an explicit "LLM report latency unavailable (no API key configured)"
   annotation. It never invents an LLM bar.
 
@@ -299,7 +299,7 @@ an artifact is missing, the panel renders a named empty state instead of a subst
 
 1. **Provider dependency and output variance.** Live output was verified with Gemini, not
    OpenAI: the first key had exhausted credits, so `LLM_MODEL=gemini-2.5-flash` and Gemini's
-   OpenAI-compatible base URL are used. The three live runs were all valid but not
+   OpenAI-compatible base URL are used. The four live runs were all valid but not
    byte-identical (one judged the patient eligible, two conservatively not eligible).
    Future work: use a provider's enforced JSON-schema mode and pin a deterministic model
    version if identical reports are required.
@@ -356,5 +356,6 @@ python -m dashboard.app --no-browser
 ```
 
 The full test suite is run with `python -m pytest -q`. The exact pass/skip totals for the
-current tree are recorded in `README.md` §1; the three skips are the `LLM_API_KEY`-gated
-report tests. No test requires network access, a paid token, or credentials.
+current tree are recorded in `README.md` §1; the single skip is the empty-state
+assertion that stands down after real report generation. The three key-gated
+report tests now run against Gemini. Mocked unit tests need no network or key.
